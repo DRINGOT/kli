@@ -36,6 +36,13 @@
 
 ## 🚀 Installation
 
+### Homebrew (Recommended)
+
+```bash
+brew tap DRINGOT/tap
+brew install DRINGOT/tap/kli
+```
+
 ### Quick Install
 
 ```bash
