@@ -1,0 +1,105 @@
+#!/usr/bin/env bash
+# kli-ctx - Context Switcher with Rich Preview (High Performance)
+
+SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
+source "$SCRIPT_DIR/kli-ui" || exit 1
+VERSION=$(cat "$SCRIPT_DIR/VERSION" 2>/dev/null || echo "0.1.0")
+
+# --- MODE PREVIEW INTERNE ---
+if [[ "${1:-}" == "--preview" ]]; then
+    ctx="$2"
+    echo -e "${CY}${ICON_PREFIX} CONTEXT: ${B}$ctx${NC}"
+    draw_line "CONTEXT: $ctx"
+
+    # 1. Infos de base (Local config, ultra rapide)
+    cluster_info=$(kubectl config view -o json 2>/dev/null)
+    cluster_name=$(kubectl config view -o jsonpath="{.contexts[?(@.name=='$ctx')].context.cluster}")
+    user_name=$(kubectl config view -o jsonpath="{.contexts[?(@.name=='$ctx')].context.user}")
+    endpoint=$(kubectl config view -o jsonpath="{.clusters[?(@.name=='$cluster_name')].cluster.server}" | sed -E 's/https?:\/\///')
+
+    echo -e "${BL}◎ IDENTITY & NETWORK${NC}"
+    printf "   %-15s : ${D}%s${NC}\n" "User" "$user_name"
+    printf "   %-15s : ${D}%s${NC}\n" "Endpoint" "$endpoint"
+
+    # 2. Ingress & Egress (Timeout 1.5s pour ne pas bloquer l'UI)
+    # On récupère l'IP du premier ingress trouvé dans n'importe quel NS
+    ingress_ip=$(kubectl get ing -A --context "$ctx" -o jsonpath='{.items[0].status.loadBalancer.ingress[0].ip}' --request-timeout=1.5s 2>/dev/null || echo "N/A")
+    printf "   %-15s : ${G}%s${NC}\n" "Ingress LB" "${ingress_ip}"
+
+    # Egress via ExternalIP ou label
+    egress_ip=$(kubectl get nodes --context "$ctx" -o jsonpath='{.items[0].status.addresses[?(@.type=="ExternalIP")].address}' --request-timeout=1.5s 2>/dev/null)
+
+    # Si vide, on check le label "nat" sur le premier nœud
+    if [[ -z "$egress_ip" ]]; then
+        egress_ip=$(kubectl get nodes --context "$ctx" -o jsonpath='{.items[0].metadata.labels.nat}' --request-timeout=1.5s 2>/dev/null)
+    fi
+
+    # Fallback final si rien n'est trouvé
+    [[ -z "$egress_ip" ]] && egress_ip="Private/NAT"
+
+    printf "   %-15s : ${Y}%s${NC}\n" "Egress (NAT)" "${egress_ip}"
+
+    # 3. Nodes Status
+    echo -e "\n${CY}⬡ NODES STATUS${NC}"
+    nodes=$(kubectl get nodes --context "$ctx" --no-headers --request-timeout=2s 2>/dev/null | head -n 8)
+    if [[ -z "$nodes" ]]; then
+        echo -e "   ${R}${ICON_ERR}${NC} ${D}Cluster unreachable${NC}"
+    else
+        echo "$nodes" | while read -r name status role age version; do
+            # On utilise ta logique smart_color pour les statuts
+            printf "   %-30s " "${D}$name${NC}"
+            echo "$status" | smart_color | tr -d '\n'
+            printf " ${D}(%s)${NC}\n" "$age"
+        done
+    fi
+
+    # 4. Usage Metrics
+    echo -e "\n${Y}⚡ TOP RESOURCES${NC}"
+    metrics=$(kubectl top nodes --context "$ctx" --no-headers --request-timeout=2s 2>/dev/null | head -n 5)
+    if [[ -n "$metrics" ]]; then
+        echo "$metrics" | sed 's/^/   /' | smart_color
+    else
+        echo -e "   ${D}Metrics Server unreachable or not installed${NC}"
+    fi
+    exit 0
+fi
+
+# --- INTERFACE PRINCIPALE ---
+current_ctx=$(kubectl config current-context 2>/dev/null)
+
+# On liste les contextes en mettant l'actuel en gras/couleur
+list_contexts() {
+    kubectl config get-contexts -o name | while read -r line; do
+        if [[ "$line" == "$current_ctx" ]]; then
+            echo -e "${B}${G}$line (current)${NC}"
+        else
+            echo -e "$line"
+        fi
+    done
+}
+
+# fzf avec ton style centralisé
+choice=$(list_contexts | fzf "${FZF_UI_OPTS[@]}" $FZF_COLOR_OPTS \
+    --ansi \
+    --style=full --padding=1,2 \
+    --header-label=" KLI : CONTEXT SWITCH " \
+    --input-label="CLUSTER SELECTION " \
+    --border-label-pos=bottom --border-label=" $FOOTER_LABEL " \
+    --preview "bash $0 --preview \$(echo {} | sed 's/ (current)//;s/  //')" \
+    $FZF_PREVIEW_OPTS \
+    --prompt "Switch to › ")
+
+if [[ -n "$choice" ]]; then
+    # Nettoyage du nom du contexte (on retire le point et le suffixe 'current')
+    clean_choice=$(echo "$choice" | sed 's/ (current)//;s/  //' | xargs)
+
+    kubectl config use-context "$clean_choice" >/dev/null
+    echo -e "\n${G}${ICON_OK}${NC} Switched to context: ${B}$clean_choice${NC}"
+
+    # Optionnel : Rafraîchir la connexion pour confirmer
+    if kubectl cluster-info --request-timeout=2s &>/dev/null; then
+        echo -e "${G}${ICON_PREFIX} Connection established successfully.${NC}"
+    else
+        echo -e "${R}${ICON_WARN} Context changed but cluster is currently unreachable.${NC}"
+    fi
+fi

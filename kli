@@ -1,0 +1,171 @@
+#!/usr/bin/env bash
+# kli - Universal Kubernetes CLI Interface (GPLv3)
+
+SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
+source "$SCRIPT_DIR/kli-ui" || exit 1
+VERSION=$(cat "$SCRIPT_DIR/VERSION" 2>/dev/null || echo "0.0.1")
+
+# --- GESTION DU SIGNAL DE SORTIE (Ctrl+C) ---
+trap "clear; exit 0" SIGINT SIGTERM
+
+# --- LOGIQUE INTERNE ---
+show_help() {
+    draw_logo "$VERSION"
+    echo -e "
+${B}USAGE:${NC}
+  kli [options] [command]
+
+${B}OPTIONS:${NC}
+  -n, --namespace <ns>   Set initial namespace
+  --explorer             Jump directly to resource explorer
+  -h, --help             Show this help message
+  -v, --version          Show version
+
+${B}COMMANDS:${NC}
+  ctx                    Switch cluster context
+  ns                     Quick namespace switch
+  run                    Start the demo/wizard mode
+    "
+    exit 0
+}
+
+check_cluster_connection() {
+    if ! kubectl cluster-info --request-timeout=2s &>/dev/null; then
+        echo -e "${R}${ICON_ERR}${NC}  Cluster unreachable!"
+        [[ -f "$SCRIPT_DIR/kli-ctx" ]] && (sleep 1; exec "$SCRIPT_DIR/kli-ctx")
+        exit 1
+    fi
+}
+
+# --- PARSING ---
+NAMESPACE=""; NS_PROVIDED=false; GOTO_EXPLORER=false
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -h|--help) show_help ;;
+        -v|--version) echo "kli version $VERSION"; exit 0 ;;
+        --explorer) GOTO_EXPLORER=true; shift ;;
+        ctx) [[ -f "$SCRIPT_DIR/kli-ctx" ]] && exec "$SCRIPT_DIR/kli-ctx" || exec kli-ctx ;;
+        ns) [[ -f "$SCRIPT_DIR/kli-ns" ]] && exec "$SCRIPT_DIR/kli-ns" || exec kli-ns ;;
+        run) [[ -f "$SCRIPT_DIR/kli-run" ]] && exec "$SCRIPT_DIR/kli-run" || exec kli-run ;;
+        -n|--namespace) NAMESPACE="$2"; NS_PROVIDED=true; shift 2 ;;
+        *) shift ;;
+    esac
+done
+
+check_cluster_connection
+clear
+draw_logo "$VERSION"
+
+STEP="HOME"
+[[ "$NS_PROVIDED" == "true" || "$GOTO_EXPLORER" == "true" ]] && STEP="NAMESPACE"
+
+while true; do
+    case "$STEP" in
+        "HOME")
+            SEL=$(echo -e "  START EXPLORER\n  SWITCH CONTEXT\n  SWITCH NAMESPACE\n  RUN WIZARD" | \
+                fzf "${FZF_UI_OPTS[@]}" "${FZF_STYLE_OPTS[@]}" $FZF_COLOR_OPTS \
+                --header-label=" KLI : MAIN MENU " --input-label=" HOME ")
+
+            STATUS=$?
+            [[ $STATUS -eq 10 || -z "$SEL" ]] && exit 0
+
+            case "$SEL" in
+                *"START EXPLORER"*)  STEP="NAMESPACE" ;;
+                *"SWITCH CONTEXT"*)  exec "$SCRIPT_DIR/kli-ctx" ;;
+                *"SWITCH NAMESPACE"*) exec "$SCRIPT_DIR/kli-ns" ;;
+                *"RUN WIZARD"*)      exec "$SCRIPT_DIR/kli-run" ;;
+            esac
+            ;;
+
+        "NAMESPACE")
+            # 1. On récupère le NS actuel
+            CUR_NS=$(kubectl config view --minify --output 'jsonpath={..namespace}' 2>/dev/null || echo "default")
+
+            # 2. Génération de la liste avec tes variables de couleurs {B} et {G}
+            # On met le NS actuel en Gras {B} et Vert {G}
+            NS_LIST=$(kubectl get namespaces -o name 2>/dev/null | sed 's/namespace\///' | sort | \
+                sed "s/^$CUR_NS$/${B}${G}$CUR_NS (current)${NC}/")
+
+            # 3. Appel FZF avec la preview de kli-ns
+            SEL_NS=$(echo -e "$NS_LIST" | fzf "${FZF_UI_OPTS[@]}" "${FZF_STYLE_OPTS[@]}" $FZF_COLOR_OPTS $FZF_PREVIEW_OPTS \
+                --ansi \
+                --header-label=" Current: $CUR_NS " \
+                --input-label=" EXPLORER : SELECT NAMESPACE " \
+                --preview "bash $SCRIPT_DIR/kli-ns --preview \$(echo {} | sed 's/ (current)//;s/\x1b\[[0-9;]*m//g')")
+
+            STATUS=$?
+
+            # 4. Logique de navigation
+            if [[ $STATUS -eq 10 || -z "$SEL_NS" ]]; then
+                STEP="HOME"
+            else
+                # Nettoyage strict (enlève le texte ET les codes couleurs injectés par {B}{G})
+                NAMESPACE=$(echo "$SEL_NS" | sed 's/ (current)//g' | sed 's/\x1b\[[0-9;]*m//g')
+                STEP="ACTION"
+            fi
+            ;;
+
+
+        "ACTION")
+            VERBS="get\ndescribe\nlogs\nedit\ntop\ndelete\nexplain\nrollout\nscale"
+            ACTION=$(echo -e "$VERBS" | fzf "${FZF_UI_OPTS[@]}" "${FZF_STYLE_OPTS[@]}" $FZF_COLOR_OPTS \
+                --header-label=" NS: $NAMESPACE " --input-label=" ACTION ")
+
+            STATUS=$?
+            if [[ $STATUS -eq 10 || -z "$ACTION" ]]; then STEP="NAMESPACE"; else STEP="RESOURCE"; fi
+            ;;
+
+        "RESOURCE")
+            # Récupération dynamique
+            RES_LIST=$(kubectl api-resources --verb="$ACTION" --namespaced=true -o name 2>/dev/null | sed 's/\..*//' | sort -u)
+
+            # Fallback si vide (ton Top 15)
+            if [[ -z "$RES_LIST" ]]; then
+                RES_LIST=$(echo -e "pods\ndeployments\nrollouts\nservices\ningress\nconfigmaps\nsecrets\nstatefulsets\nreplicasets\njobs\ncronjobs\nhorizontalpodautoscalers\npersistentvolumeclaims\npersistentvolumes\nendpoints")
+            fi
+
+            RESOURCE=$(echo -e "$RES_LIST" | fzf "${FZF_UI_OPTS[@]}" "${FZF_STYLE_OPTS[@]}" $FZF_COLOR_OPTS $FZF_PREVIEW_OPTS \
+                --header-label=" Mode: $ACTION | NS: $NAMESPACE " \
+                --input-label=" RESOURCE " \
+                --preview "bash $SCRIPT_DIR/kli-engine $ACTION {} '' $NAMESPACE" --prompt "Search › ")
+
+            STATUS=$?
+            if [[ $STATUS -eq 10 || -z "$RESOURCE" ]]; then
+                STEP="ACTION"
+            else
+                [[ "$ACTION" == "explain" ]] && STEP="FINISH" || STEP="INSTANCE"
+            fi
+            ;;
+
+        "INSTANCE")
+            INS_LIST=$(kubectl get "$RESOURCE" -n "$NAMESPACE" -o name 2>/dev/null | sed 's/.*\///' | sort)
+            if [[ -z "$INS_LIST" ]]; then
+                echo -e "${Y}${ICON_WARN}${NC} No $RESOURCE found in $NAMESPACE."
+                sleep 1; STEP="RESOURCE"; continue
+            fi
+
+            INSTANCE=$(echo -e "$INS_LIST" | fzf "${FZF_UI_OPTS[@]}" "${FZF_STYLE_OPTS[@]}" $FZF_COLOR_OPTS $FZF_PREVIEW_OPTS \
+                --header-label=" $NAMESPACE / $RESOURCE " --input-label=" INSTANCE " \
+                --preview "bash $SCRIPT_DIR/kli-engine preview $RESOURCE {} $NAMESPACE")
+
+            STATUS=$?
+            if [[ $STATUS -eq 10 || -z "$INSTANCE" ]]; then STEP="RESOURCE"; else STEP="FINISH"; fi
+            ;;
+
+        "FINISH") break ;;
+    esac
+done
+
+# --- EXECUTION ---
+clear
+draw_status_bar "$ACTION $RESOURCE"
+FINAL_CMD="kubectl $ACTION $RESOURCE $INSTANCE -n $NAMESPACE"
+echo -e "${G}${ICON_ARROW}${NC} Executing: ${B}$FINAL_CMD${NC}\n"
+
+if [[ "$ACTION" == "logs" ]]; then
+    kubectl logs -f -n "$NAMESPACE" "$INSTANCE"
+elif [[ "$ACTION" == "explain" ]]; then
+    kubectl explain "$RESOURCE" | less
+else
+    kubectl "$ACTION" "$RESOURCE" -n "$NAMESPACE" "$INSTANCE"
+fi

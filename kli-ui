@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+# kli-ui - Central UI Library for KLI
+
+# --- COULEURS ANSI ---
+B=$(printf '\033[1m'); D=$(printf '\033[90m'); G=$(printf '\033[32m')
+R=$(printf '\033[31m'); Y=$(printf '\033[33m'); BL=$(printf '\033[34m')
+CY=$(printf '\033[36m'); NC=$(printf '\033[0m')
+
+# --- SYMBOLES ---
+ICON_OK="●"; ICON_ERR="✖"; ICON_WARN="▲"; ICON_INFO="○"
+ICON_ARROW="›"; ICON_PREFIX="╶╴"
+
+# --- CONFIGURATION FZF ---
+FZF_UI_OPTS=(
+    "--ansi"
+    "--height=100%"
+    "--reverse"
+    "--border=rounded"
+    "--pointer=${ICON_ARROW} "
+)
+
+# --- CONFIGURATION PREVIEW ---
+FZF_PREVIEW_CTX="--preview-window=right:65%:border-left"
+FZF_PREVIEW_NS="--preview-window=right:85%:border-left:wrap"
+FZF_PREVIEW_DEFAULT="--preview-window=right:80%:border-left"
+
+FZF_COLOR_OPTS="--color=border:7,label:7,header:7,pointer:2,hl:2,fg:7,fg+:15,bg+:-1,gutter:-1,header-label:bold:cyan,input-label:bold:white"
+FOOTER_LABEL=" esc: return • ctrl+c: quit "
+
+FZF_STYLE_OPTS=(
+    "--style=full"
+    "--padding=1,2"
+    "--border-label-pos=bottom"
+    "--border-label=$FOOTER_LABEL"
+    "--bind=esc:abort+execute(exit 10),ctrl-c:abort"
+)
+
+# --- FONCTIONS DE RENDU UI ---
+draw_logo() {
+    printf "${B}  _  ___      _____
+ | |/ / |    |_   _|
+ | ' /| |      | |
+ | . \| |___  _| |_
+ |_|\_\_____||_____|${NC}  ${D}${1}${NC}\n"
+}
+
+draw_line() {
+    local text="$1"
+    local clean_text=$(echo -e "$text" | sed 's/\x1b\[[0-9;]*m//g')
+    local width=${#clean_text}
+    [[ $width -eq 0 ]] && width=40
+    printf "${D}"
+    printf '─%.0s' $(seq 1 $(($width + 2)))
+    printf "${NC}\n"
+}
+
+draw_status_bar() {
+    local label="$1"
+    echo -e "\n${B}Kubernetes Lens Interface${NC} ${D}${ICON_PREFIX} ${label}${NC}"
+    draw_line "Kubernetes Lens Interface ╶╴ ${label}"
+}
+
+# --- COLORISATION UNIVERSELLE (Déplacé ici) ---
+smart_color() {
+    sed -E \
+        -e "s/(Running|Active|Ready|True|Complete|Healthy|Succeeded)/${G}\1${NC}/g" \
+        -e "s/(Pending|ContainerCreating|Terminating|False|Unknown|Degraded|Progressing|Suspended)/${Y}\1${NC}/g" \
+        -e "s/(Failed|Error|CrashLoopBackOff|ErrImagePull|ImagePullBackOff|OOMKilled|Evicted|Unhealthy|BackOff)/${R}\1${NC}/g" \
+        -e "s/([0-9a-z-]+-deployment-[0-9a-z-]+)/${CY}\1${NC}/g" \
+        -e "s/^/  /"
+}

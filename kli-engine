@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# kli-engine - Contextual Data Fetcher
+
+SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
+source "$SCRIPT_DIR/kli-ui" || exit 1
+
+MODE="$1"; TARGET="$2"; NAME="$3"; NS="$4"
+
+# --- LOGIQUE NAMESPACE ---
+if [[ -z "$NS" ]]; then
+    if [[ "$MODE" != "preview" && -n "$NAME" ]]; then NS="$NAME"; NAME=""; else NS="default"; fi
+fi
+
+case "$MODE" in
+    "get"|"describe"|"edit"|"delete"|"logs"|"explain"|"rollout"|"scale")
+        echo -e "${D}${ICON_PREFIX}${NC} ${B}Live $TARGET in ${CY}$NS${NC}"
+        draw_line "Live $TARGET List in $NS"
+        kubectl get "$TARGET" -n "$NS" -o wide 2>/dev/null | head -n 40 | smart_color
+        ;;
+
+    "top")
+        echo -e "${Y}${ICON_PREFIX}${NC} ${B}$TARGET Metrics in ${CY}$NS${NC}"
+        draw_line "$TARGET Usage in $NS"
+        cmd="kubectl top $TARGET"
+        [[ "$TARGET" != "nodes" ]] && cmd="$cmd -n $NS"
+        $cmd 2>/dev/null | smart_color
+        ;;
+
+    "preview")
+        echo -e "${G}${ICON_PREFIX}${NC} ${B}Details: $TARGET/$NAME ${D}(NS: $NS)${NC}"
+        draw_line "Details for $TARGET/$NAME in $NS"
+
+        if [[ "$TARGET" =~ ^pod ]]; then
+            echo -e "${BL}${ICON_PREFIX}${NC} ${B}Recent Logs (Last 20 lines):${NC}"
+            kubectl logs "$NAME" -n "$NS" --tail=20 2>/dev/null | sed 's/^/  /'
+            echo -e "${D}────────────────────────────────────────────────────────────${NC}"
+        fi
+
+        kubectl describe "$TARGET" "$NAME" -n "$NS" 2>/dev/null | \
+            head -n 120 | \
+            sed -E "s/^([ ]*[a-zA-Z0-9 ]+:)/${D}\1${NC}/" | \
+            smart_color
+        ;;
+esac
