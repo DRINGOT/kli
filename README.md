@@ -1,10 +1,10 @@
-# KLI - Kubernetes Lens Interface
+# KLI - Kubernetes CLI Interface
 
-![Version](https://img.shields.io/badge/version-0.0.1-blue.svg)
+![Version](https://img.shields.io/badge/version-0.2.0-blue.svg)
 ![License](https://img.shields.io/badge/license-GPLv3-green.svg)
 ![Shell](https://img.shields.io/badge/shell-bash-orange.svg)
 
-**KLI** is a modern and interactive command-line interface for Kubernetes, designed to simplify cluster navigation and management through a rich user interface based on `fzf`.
+**KLI** is an interactive terminal interface for Kubernetes built on `fzf`. Navigate your cluster, inspect resources, stream logs, exec into containers and monitor live metrics — all from a keyboard-driven UI.
 
 ```
   _  ___      _____
@@ -14,27 +14,18 @@
  |_|\_\_____||_____|
 ```
 
-## ✨ Features
-
-- 🎯 **Smart Navigation** - Interactive interface with real-time preview
-- 🔄 **Context Switching** - Quick switching between Kubernetes clusters
-- 📦 **Resource Explorer** - Visualization and management of all K8s resources
-- 🔍 **Live Preview** - Display logs, YAML and status in real-time
-- ⚡ **Performance** - Optimal use of `fzf` for a smooth experience
-- 🎨 **Modern UI** - Colorful interface with symbols and visual status
-- 🛠️ **Kubectl Actions** - Execute kubectl commands (get, describe, logs, edit, delete, etc.)
-
-## 📋 Prerequisites
+## Prerequisites
 
 ### Required
-- `kubectl` - Kubernetes CLI
-- `fzf` - Fuzzy finder (>= 0.27.0 recommended)
+- `kubectl` — Kubernetes CLI
+- `fzf` — Fuzzy finder (**>= 0.36** required for live refresh)
+- `curl` — Used for live data refresh (built-in on macOS)
 
 ### Optional
-- `jq` - For advanced JSON parsing
-- Metrics Server (for `top` commands)
+- `jq` — Node resource requests / limits breakdown
+- **Metrics Server** — Required for `kli top` and `kli nodes`
 
-## 🚀 Installation
+## Installation
 
 ### Homebrew (Recommended)
 
@@ -46,229 +37,179 @@ brew install DRINGOT/tap/kli
 ### Quick Install
 
 ```bash
-# Clone the repository
 git clone https://github.com/DRINGOT/kli.git
 cd kli
-
-# Run the installation
 ./install.sh
 ```
 
-The installation script will:
-1. Check system dependencies
-2. Copy binaries to `/usr/local/bin`
-3. Configure appropriate permissions
+### Shell Completion
+
+```bash
+echo 'source /usr/local/bin/kli-completion' >> ~/.zshrc
+# or for bash:
+echo 'source /usr/local/bin/kli-completion' >> ~/.bashrc
+```
 
 ### Manual Installation
 
 ```bash
-# Copy files
-sudo cp kli kli-ctx kli-engine kli-ns kli-run /usr/local/bin/
-sudo cp kli-ui VERSION /usr/local/bin/
-
-# Make scripts executable
-sudo chmod +x /usr/local/bin/kli*
+sudo cp kli kli-ctx kli-ns kli-engine kli-ui \
+        kli-top kli-node kli-find kli-completion VERSION \
+        /usr/local/bin/
+sudo chmod +x /usr/local/bin/kli{,-ctx,-ns,-engine,-top,-node,-find}
 ```
 
-## 📖 Usage
+## Usage
 
-### Main Interactive Mode
+### Interactive Mode
 
 ```bash
 kli
 ```
 
-Launches the main interface with the home menu allowing you to:
-- Start the resource explorer
-- Switch Kubernetes context
-- Switch namespace
-- Launch the initialization wizard
+Opens the home menu. Use `ctrl+h` at any time to display the help page.
 
 ### Direct Commands
 
 ```bash
-# Switch Kubernetes context
-kli ctx
-
-# Switch namespace
-kli ns
-
-# Launch the demo wizard
-kli run
-
-# Start explorer directly
-kli --explorer
-
-# Set initial namespace
-kli -n monitoring
-kli --namespace production
+kli ctx              # Switch cluster context
+kli ns               # Switch active namespace
+kli top              # Live pod CPU/MEM usage (all namespaces)
+kli nodes            # Cluster node resource overview
+kli find             # Search resources across all namespaces
+kli find deployments # Search a specific resource type directly
 ```
 
-### Available Options
+### Options
 
 ```
+kli [options] [command]
+
 OPTIONS:
   -n, --namespace <ns>   Set initial namespace
   --explorer             Jump directly to resource explorer
-  -h, --help             Show this help message
+  --pod <name>           Jump to action menu for a specific pod
+  --resource <type>      Pre-select resource type (use with --instance)
+  --instance <name>      Pre-select resource instance
+  -h, --help             Show help
   -v, --version          Show version
-
-COMMANDS:
-  ctx                    Switch cluster context
-  ns                     Quick namespace switch
-  run                    Start the demo/wizard mode
 ```
 
-## 🎮 User Interface
+## Features
 
-### Keyboard Navigation
-
-- **ENTER** : Select / Validate
-- **ESC** : Return to previous menu
-- **Ctrl+C** : Exit cleanly
-- **↑/↓** : Navigate through lists
-- **Type to search** : Dynamic filtering
-
-### Navigation Flow
+### Home Menu
+Central hub with live preview describing each module. Press `ctrl+h` for full help.
 
 ```
 HOME
- ├── START EXPLORER
- │    └── NAMESPACE
- │         └── ACTION (get, describe, logs, edit, etc.)
- │              └── RESOURCE (pods, services, deployments, etc.)
- │                   └── ITEM (specific selection)
- ├── SWITCH CONTEXT (kli-ctx)
- ├── SWITCH NAMESPACE (kli-ns)
- └── RUN WIZARD (kli-run)
+ ├── COMMAND EXPLORER   →  namespace → action → resource → instance
+ ├── FINDER             →  resource type picker → all-namespaces search
+ ├── SWITCH CONTEXT     →  browse & switch kubectl contexts
+ ├── SWITCH NAMESPACE   →  change active namespace
+ ├── TOP NODES          →  cluster node resource overview
+ └── TOP RESOURCES      →  live pod CPU/MEM ranking
 ```
 
-## 🏗️ Architecture
+### Command Explorer
+Full `kubectl` workflow in a guided fzf interface:
 
-The project consists of several modules:
+| Action | Description |
+|---|---|
+| `get` | List and filter resources |
+| `describe` | Full details, events & conditions |
+| `logs` | Stream container logs |
+| `exec` | Open a shell inside a container |
+| `port-forward` | Forward a local port to a pod / service |
+| `edit` | Edit resource YAML in your editor |
+| `top` | Live CPU & Memory metrics |
+| `delete` | Delete a resource (with confirmation) |
+| `scale` | Adjust replica count |
+| `rollout` | Manage deployment rollouts (restart, status, history, undo) |
+| `events` | Recent namespace events |
+| `explain` | API documentation |
 
-- **`kli`** - Main entry point and orchestrator
-- **`kli-ctx`** - Context switching module with node preview
-- **`kli-ns`** - Namespace switching module with pod overview
-- **`kli-engine`** - Kubectl action execution engine with colorization
-- **`kli-run`** - Interactive wizard for onboarding
-- **`kli-ui`** - Shared UI library (colors, symbols, rendering functions)
+### Top Resources (`kli top`)
+Live pod CPU/MEM ranking across all namespaces. **Auto-refreshes every 15s** with a countdown spinner.
 
-### File Structure
+| Key | Action |
+|---|---|
+| `tab` / `ctrl+t` | Toggle sort CPU ↔ MEM |
+| `enter` | Jump to pod action menu |
+| `ctrl+n` | Switch to node view |
 
-```
-kli/
-├── kli                 # Main binary
-├── kli-ctx            # Context switcher
-├── kli-ns             # Namespace switcher
-├── kli-engine         # Data fetcher
-├── kli-run            # Interactive wizard
-├── kli-ui             # UI library
-├── install.sh         # Installation script
-├── VERSION            # Version file
-├── LICENSE            # GPL v3 License
-└── README.md          # Documentation
-```
+### Top Nodes (`kli nodes`)
+Cluster-level node dashboard with ASCII CPU/RAM bars showing used vs. allocatable. Drill into pods per node. **Auto-refreshes every 15s**.
 
-## 🎨 Visual Features
+| Key | Action |
+|---|---|
+| `enter` | View pods on selected node |
+| `ctrl+p` | Switch to pod top view |
+
+### Finder (`kli find`)
+Cross-namespace resource search with an interactive resource type picker.
+
+| Key | Action |
+|---|---|
+| `enter` | Jump to action menu for selected resource |
+| `esc` | Change resource type |
 
 ### Smart Colorization
 
-Statuses are automatically colorized:
-- 🟢 **Green** : Running, Active, Ready, Succeeded
-- 🟡 **Yellow** : Pending, ContainerCreating, Progressing
-- 🔴 **Red** : Failed, Error, CrashLoopBackOff, OOMKilled
+| Color | Status |
+|---|---|
+| Green | Running, Active, Ready, Succeeded, Bound |
+| Yellow | Pending, ContainerCreating, Terminating |
+| Red | Failed, Error, CrashLoopBackOff, OOMKilled, ImagePullBackOff |
 
-### Real-Time Preview
+## Global Keyboard Shortcuts
 
-- **Contexts** : Display nodes, endpoints and metrics
-- **Namespaces** : List pods and their statuses
-- **Resources** : Detailed YAML and recent logs
+| Key | Action |
+|---|---|
+| `esc` | Return to previous screen |
+| `ctrl+c` | Quit kli |
+| `ctrl+h` | Open help page (from home menu) |
 
-## 🔧 Configuration
+## Architecture
 
-KLI uses the standard kubectl configuration (`~/.kube/config`) and requires no additional configuration.
+| File | Role |
+|---|---|
+| `kli` | Main entry point, home menu, explorer flow |
+| `kli-ctx` | Context switcher |
+| `kli-ns` | Namespace switcher |
+| `kli-engine` | kubectl action engine with preview & colorization |
+| `kli-ui` | Shared UI library (colors, symbols, fzf options, logo) |
+| `kli-top` | Live pod resource usage dashboard |
+| `kli-node` | Cluster node resource overview |
+| `kli-find` | Cross-namespace resource finder |
+| `kli-completion` | Shell completion (bash / zsh) |
+| `VERSION` | Current version string |
 
-## 🐛 Troubleshooting
+## Troubleshooting
 
-### "Cluster unreachable" Error
+### Metrics not available
 
 ```bash
-# Check cluster connection
+kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
+```
+
+### Cluster unreachable
+
+```bash
 kubectl cluster-info
-
-# Check current context
 kubectl config current-context
-
-# Use kli ctx to switch context
-kli ctx
+kli ctx   # switch context interactively
 ```
 
-### fzf not found
+### fzf too old (live refresh not working)
 
 ```bash
-# macOS
-brew install fzf
-
-# Ubuntu/Debian
-sudo apt install fzf
-
-# Arch Linux
-sudo pacman -S fzf
+brew upgrade fzf   # macOS
 ```
 
-## 📝 Usage Examples
+## License
 
-### Typical Workflow
+GNU General Public License v3.0 — see [LICENSE](LICENSE).
 
-```bash
-# 1. Check/switch context
-kli ctx
+## Author
 
-# 2. Select a namespace
-kli ns
-
-# 3. Explore resources
-kli --explorer
-
-# Or all in one command
-kli -n production
-```
-
-### Available Actions in Explorer
-
-- **get** - List resources
-- **describe** - Complete details of a resource
-- **logs** - View logs (pods)
-- **edit** - Edit YAML configuration
-- **top** - CPU/RAM metrics
-- **delete** - Delete a resource
-- **explain** - Resource documentation
-- **rollout** - Manage deployments
-- **scale** - Scale a resource
-
-## 🤝 Contributing
-
-Contributions are welcome! Feel free to:
-- Open issues to report bugs
-- Submit pull requests for new features
-- Improve documentation
-
-## 📄 License
-
-This project is distributed under the **GNU General Public License v3.0**. See the [LICENSE](LICENSE) file for more details.
-
-## 👤 Author
-
-**Donovan Ringot**
-- GitHub: [@DRINGOT](https://github.com/DRINGOT)
-
-## 🙏 Acknowledgments
-
-- [kubectl](https://kubernetes.io/docs/reference/kubectl/) - Official Kubernetes CLI
-- [fzf](https://github.com/junegunn/fzf) - The fuzzy finder that makes this all possible
-- The Kubernetes community
-
----
-
-**KLI** - Making Kubernetes management interactive and enjoyable! 🚀
+**Donovan Ringot** — [@DRINGOT](https://github.com/DRINGOT)
