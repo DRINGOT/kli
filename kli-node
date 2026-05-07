@@ -1,0 +1,373 @@
+#!/usr/bin/env bash
+# kli-node - Cluster Node Resource Dashboard
+
+SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
+source "$SCRIPT_DIR/kli-ui" || exit 1
+VERSION=$(cat "$SCRIPT_DIR/VERSION" 2>/dev/null || echo "0.2.0")
+
+# --- PROGRESS BAR---
+make_bar() {
+    local pct="${1//%/}"
+    local width=16
+    (( pct < 0 )) && pct=0
+    (( pct > 100 )) && pct=100
+    local filled=$(( pct * width / 100 ))
+    local empty=$(( width - filled ))
+    local color
+    if   (( pct >= 80 )); then color=$R
+    elif (( pct >= 60 )); then color=$Y
+    else color=$G
+    fi
+    printf "["
+    printf "${color}"
+    local i; for (( i=0; i<filled; i++ )); do printf '█'; done
+    printf "${D}"
+    for (( i=0; i<empty; i++ )); do printf '░'; done
+    printf "${NC}]"
+}
+
+# "8" -> "8000m" | "7910m" -> "7910m"
+norm_cpu() {
+    local v="$1"
+    if [[ "$v" =~ ^[0-9]+$ ]]; then echo "${v}000m"; else echo "$v"; fi
+}
+
+# Ki/Mi -> Gi (integer)
+norm_mem_gi() {
+    local v="$1"
+    if   [[ "$v" =~ ^([0-9]+)Ki$ ]]; then echo "$(( ${BASH_REMATCH[1]} / 1024 / 1024 ))Gi"
+    elif [[ "$v" =~ ^([0-9]+)Mi$ ]]; then echo "$(( ${BASH_REMATCH[1]} / 1024 ))Gi"
+    elif [[ "$v" =~ ^([0-9]+)Gi$ ]]; then echo "${v}"
+    else echo "$v"; fi
+}
+
+# --- PREVIEW ---
+if [[ "${1:-}" == "--preview" ]]; then
+    NODE="$2"
+    printf "${Y}⚡${NC} ${B}%s${NC}\n" "$NODE"
+
+    metrics=$(kubectl top node "$NODE" --no-headers 2>/dev/null)
+    alloc=$(kubectl get node "$NODE" \
+        -o jsonpath='{.status.allocatable.cpu}{" "}{.status.allocatable.memory}' 2>/dev/null)
+    ACPU_RAW=$(echo "$alloc" | awk '{print $1}')
+    AMEM_RAW=$(echo "$alloc" | awk '{print $2}')
+
+    if [[ -n "$metrics" ]]; then
+        CPU_CORES=$(echo "$metrics" | awk '{print $2}')
+        CPU_PCT=$(echo   "$metrics" | awk '{print $3}' | tr -d '%')
+        MEM_BYTES=$(echo "$metrics" | awk '{print $4}')
+        MEM_PCT=$(echo   "$metrics" | awk '{print $5}' | tr -d '%')
+
+        ACPU=$(norm_cpu    "$ACPU_RAW")
+        AMEM=$(norm_mem_gi "$AMEM_RAW")
+        UMEM=$(norm_mem_gi "$MEM_BYTES")
+
+        printf "   CPU  "
+        make_bar "$CPU_PCT"
+        printf "  %3s%%   ${B}%s${NC} ${D}used${NC}  /  %s ${D}allocatable${NC}\n" "$CPU_PCT" "$CPU_CORES" "$ACPU"
+
+        printf "   MEM  "
+        make_bar "$MEM_PCT"
+        printf "  %3s%%   ${B}%s${NC} ${D}used${NC}  /  %s ${D}allocatable${NC}\n" "$MEM_PCT" "$UMEM" "$AMEM"
+    fi
+
+    # Pod requests + limits (requires jq)
+    if command -v jq &>/dev/null; then
+        pod_json=$(kubectl get pods -A --field-selector "spec.nodeName=$NODE" -o json 2>/dev/null)
+
+        jq_cpu='map(if test("m$") then (.[:-1]|tonumber)
+                    elif test("^[0-9]+(\\.[0-9]+)?$") then (tonumber*1000|floor)
+                    else 0 end) | add // 0 | "\(.)m"'
+        jq_mem='map(if test("Mi$") then (.[:-2]|tonumber)
+                    elif test("Gi$") then (.[:-2]|tonumber*1024|floor)
+                    elif test("Ki$") then (.[:-2]|tonumber/1024|floor)
+                    elif test("^[0-9]+$") then (tonumber/1048576|floor)
+                    else 0 end) | add // 0'
+
+        req_cpu=$(echo "$pod_json" | jq -r "[.items[].spec.containers[].resources.requests.cpu // \"0m\"] | $jq_cpu")
+        lim_cpu=$(echo "$pod_json" | jq -r "[.items[].spec.containers[].resources.limits.cpu   // \"0m\"] | $jq_cpu")
+
+        req_mem=$(norm_mem_gi "$(echo "$pod_json" | jq -r "[.items[].spec.containers[].resources.requests.memory // \"0Mi\"] | $jq_mem")Mi")
+        lim_mem=$(norm_mem_gi "$(echo "$pod_json" | jq -r "[.items[].spec.containers[].resources.limits.memory   // \"0Mi\"] | $jq_mem")Mi")
+
+        printf "   ${D}Requests:${NC}  CPU ${Y}%-12s${NC}  MEM ${Y}%s${NC}\n" "$req_cpu" "$req_mem"
+        printf "   ${D}Limits:${NC}    CPU ${Y}%-12s${NC}  MEM ${Y}%s${NC}\n" "$lim_cpu" "$lim_mem"
+    fi
+
+    printf "\n"
+    kubectl get node "$NODE" --no-headers 2>/dev/null | \
+        awk '{printf "   Status: %-10s  Version: %-22s  Age: %s\n", $2, $5, $4}'
+
+    pool=$(kubectl get node "$NODE" \
+        -o jsonpath='{.metadata.labels.cloud\.google\.com/gke-nodepool}' 2>/dev/null)
+    [[ -n "$pool" ]] && printf "   Node pool: ${D}%s${NC}\n" "$pool"
+
+    printf "\n   ${D}Pods on this node:${NC}\n"
+    kubectl get pods -A --field-selector "spec.nodeName=$NODE" --no-headers 2>/dev/null | \
+        awk '{
+            pod = length($2) > 50 ? substr($2, 1, 50)".." : $2
+            printf " %-20s %-52s %-14s  restarts: %s  age: %s\n", $1, pod, $4, $5, $NF
+        }' | head -n 12 | smart_color
+    exit 0
+fi
+
+# --- PREVIEW POD ---
+if [[ "${1:-}" == "--pod-preview" ]]; then
+    NS="$2"; POD_ARG="$3"
+
+    # Résoudre le vrai nom si tronqué (suffix ..)
+    if [[ "$POD_ARG" == *..* ]]; then
+        PREFIX="${POD_ARG%..}"
+        POD=$(kubectl get pods -n "$NS" --no-headers 2>/dev/null | \
+            awk -v p="$PREFIX" 'substr($1,1,length(p))==p{print $1; exit}')
+        [[ -z "$POD" ]] && POD="$POD_ARG"
+    else
+        POD="$POD_ARG"
+    fi
+
+    printf "${Y}⚡${NC} ${B}%s${NC}  ${D}ns: %s${NC}\n" "$POD" "$NS"
+
+    # Live metrics (total + per container)
+    metrics=$(kubectl top pod "$POD" -n "$NS" --no-headers 2>/dev/null)
+    if [[ -n "$metrics" ]]; then
+        printf "   ${D}Live:${NC}   CPU ${B}%s${NC}   MEM ${B}%s${NC}\n" \
+            "$(echo "$metrics" | awk '{print $2}')" "$(echo "$metrics" | awk '{print $3}')"
+        kubectl top pod "$POD" -n "$NS" --no-headers --containers 2>/dev/null | \
+            awk '{printf "      %-30s  CPU %-8s  MEM %s\n", $2, $3, $4}'
+    fi
+
+    # Per-container requests/limits (jsonpath, no jq needed)
+    printf "\n   ${D}Containers:${NC}\n"
+    kubectl get pod "$POD" -n "$NS" \
+        -o jsonpath='{range .spec.containers[*]}{.name}{"\t"}{.resources.requests.cpu}{"\t"}{.resources.requests.memory}{"\t"}{.resources.limits.cpu}{"\t"}{.resources.limits.memory}{"\n"}{end}' \
+        2>/dev/null | while IFS=$'\t' read -r cname cpu_req mem_req cpu_lim mem_lim; do
+        [[ -z "$cname" ]] && continue
+        printf "   ${CY}%s${NC}\n" "$cname"
+        printf "      CPU  req: ${Y}%-10s${NC}  lim: ${Y}%s${NC}\n" "${cpu_req:--}" "${cpu_lim:--}"
+        printf "      MEM  req: ${Y}%-10s${NC}  lim: ${Y}%s${NC}\n" "${mem_req:--}" "${mem_lim:--}"
+    done
+
+    # Status  ($1=NAME $2=READY $3=STATUS $4=RESTARTS $5=AGE — single pod, not -A)
+    printf "\n"
+    kubectl get pod "$POD" -n "$NS" --no-headers 2>/dev/null | \
+        awk '{printf "   Status: %-12s  Ready: %-8s  Restarts: %-6s  Age: %s\n", $3, $2, $4, $NF}'
+
+    # Recent events
+    events=$(kubectl get events -n "$NS" \
+        --field-selector "involvedObject.name=$POD" \
+        --sort-by=.lastTimestamp --no-headers 2>/dev/null | tail -n 3)
+    if [[ -n "$events" ]]; then
+        printf "\n   ${D}Recent events:${NC}\n"
+        echo "$events" | awk '{printf "   %-6s  %s  %s\n", $1, $5, $6}' | smart_color
+    fi
+    exit 0
+fi
+
+# --- MODE PODS PER NODE ---
+if [[ "${1:-}" == "--pods" ]]; then
+    NODE="$2"
+    clear; draw_logo "$VERSION"; draw_status_bar "node: $NODE"
+
+    TOP_DATA=$(kubectl top pods -A --no-headers 2>/dev/null)
+    POD_DATA=$(kubectl get pods -A --field-selector "spec.nodeName=$NODE" --no-headers 2>/dev/null)
+
+    if [[ -z "$POD_DATA" ]]; then
+        echo -e "\n  ${Y}${ICON_WARN}${NC} No pods scheduled on ${B}$NODE${NC}."
+        exit 0
+    fi
+
+    LIST=$(awk '
+        NR==FNR { cpu[$1,$2]=$3; mem[$1,$2]=$4; next }
+        {
+            pod = length($2)>50 ? substr($2,1,50)".." : $2
+            c = (($1,$2) in cpu) ? cpu[$1,$2] : "~"
+            m = (($1,$2) in mem) ? mem[$1,$2] : "~"
+            printf "  %-20s %-52s %-10s %-12s %s\n", $1, pod, c, m, $4
+        }
+    ' <(echo "$TOP_DATA") <(echo "$POD_DATA") | sed -E \
+        -e "s/(Running|Succeeded)/${G}\1${NC}/g" \
+        -e "s/(Pending|Terminating|ContainerCreating)/${Y}\1${NC}/g" \
+        -e "s/(Failed|Error|CrashLoopBackOff|OOMKilled|ImagePullBackOff)/${R}\1${NC}/g")
+
+    HEADER=$(printf "  %-20s %-52s %-10s %-12s %s\n" \
+        "NAMESPACE" "POD" "CPU" "MEM" "STATUS")
+    PODS_PORT=$(( RANDOM % 20000 + 40000 ))
+    PODS_BASE=" esc: return • ctrl+c: quit • ctrl+n: node view"
+    trap "kill $PODS_BG_PID 2>/dev/null" EXIT
+
+    (
+        SPIN=('⠋' '⠙' '⠹' '⠸' '⠼' '⠴' '⠦' '⠧' '⠇' '⠏')
+        n=${#SPIN[@]}; idx=0
+        until curl -sf "localhost:$PODS_PORT" -o /dev/null \
+            -d "change-border-label($PODS_BASE • ${SPIN[0]} 15s )" 2>/dev/null; do
+            sleep 0.1
+        done
+        idx=1
+        while true; do
+            for i in $(seq 14 -1 1); do
+                sleep 1
+                curl -s "localhost:$PODS_PORT" -o /dev/null \
+                    -d "change-border-label($PODS_BASE • ${SPIN[$((idx % n))]} ${i}s )" 2>/dev/null || true
+                idx=$((idx + 1))
+            done
+            sleep 1
+            curl -s "localhost:$PODS_PORT" -o /dev/null \
+                -d "reload(bash $SCRIPT_DIR/kli-node --pods-list $NODE)+change-border-label($PODS_BASE • ↻ refreshing... )" \
+                2>/dev/null || true
+            sleep 0.3
+            curl -s "localhost:$PODS_PORT" -o /dev/null \
+                -d "change-border-label($PODS_BASE • ${SPIN[$((idx % n))]} 15s )" 2>/dev/null || true
+            idx=$((idx + 1))
+        done
+    ) &
+    PODS_BG_PID=$!
+    PODS_FOOTER="$PODS_BASE • ⠋ 15s "
+
+    SEL=$(echo "$LIST" | fzf \
+        "${FZF_UI_OPTS[@]}" "${FZF_STYLE_OPTS[@]}" $FZF_COLOR_OPTS \
+        --ansi \
+        --listen "$PODS_PORT" \
+        --header-label=" NODE: $NODE " \
+        --input-label=" Search Pods " \
+        --header="$HEADER" \
+        --border-label="$PODS_FOOTER" \
+        --preview-window=down:14:border-top \
+        --preview "bash $SCRIPT_DIR/kli-node --pod-preview {1} {2}" \
+        --bind "ctrl-n:become(bash $SCRIPT_DIR/kli-node)")
+    kill $PODS_BG_PID 2>/dev/null
+
+    if [[ -n "$SEL" ]]; then
+        NS=$(echo "$SEL" | awk '{print $1}')
+        POD_ARG=$(echo "$SEL" | awk '{print $2}')
+        if [[ "$POD_ARG" == *..* ]]; then
+            PREFIX="${POD_ARG%..}"
+            FULL_POD=$(kubectl get pods -n "$NS" --no-headers 2>/dev/null | \
+                awk -v p="$PREFIX" 'substr($1,1,length(p))==p{print $1; exit}')
+            POD="${FULL_POD:-$PREFIX}"
+        else
+            POD="$POD_ARG"
+        fi
+        echo -e "\n${G}${ICON_ARROW}${NC} Jumping to: ${B}$POD${NC} ${D}in${NC} ${CY}$NS${NC}"
+        sleep 0.3
+        exec "$SCRIPT_DIR/kli" -n "$NS" --pod "$POD" --back "kli-node:--pods:$NODE"
+    fi
+    exit 0
+fi
+
+# --- MODE PODS-LIST (fzf reload) ---
+if [[ "${1:-}" == "--pods-list" ]]; then
+    NODE="$2"
+    TOP_DATA=$(kubectl top pods -A --no-headers 2>/dev/null)
+    POD_DATA=$(kubectl get pods -A --field-selector "spec.nodeName=$NODE" --no-headers 2>/dev/null)
+    [[ -z "$POD_DATA" ]] && exit 0
+    awk '
+        NR==FNR { cpu[$1,$2]=$3; mem[$1,$2]=$4; next }
+        {
+            pod = length($2)>50 ? substr($2,1,50)".." : $2
+            c = (($1,$2) in cpu) ? cpu[$1,$2] : "~"
+            m = (($1,$2) in mem) ? mem[$1,$2] : "~"
+            printf "  %-20s %-52s %-10s %-12s %s\n", $1, pod, c, m, $4
+        }
+    ' <(echo "$TOP_DATA") <(echo "$POD_DATA") | sed -E \
+        -e "s/(Running|Succeeded)/${G}\1${NC}/g" \
+        -e "s/(Pending|Terminating|ContainerCreating)/${Y}\1${NC}/g" \
+        -e "s/(Failed|Error|CrashLoopBackOff|OOMKilled|ImagePullBackOff)/${R}\1${NC}/g"
+    exit 0
+fi
+
+# --- MODE LIST ( fzf) ---
+if [[ "${1:-}" == "--list" ]]; then
+    ALLOC=$(kubectl get nodes \
+        -o custom-columns='NAME:.metadata.name,CPU:.status.allocatable.cpu,MEM:.status.allocatable.memory' \
+        --no-headers 2>/dev/null)
+
+    kubectl top nodes --no-headers 2>/dev/null | while read -r NAME CPU_CORES CPU_PCT MEM_BYTES MEM_PCT; do
+        CPU_VAL="${CPU_PCT//%/}"
+        MEM_VAL="${MEM_PCT//%/}"
+
+        ACPU_RAW=$(echo "$ALLOC" | awk -v n="$NAME" '$1==n{print $2}')
+        AMEM_RAW=$(echo "$ALLOC" | awk -v n="$NAME" '$1==n{print $3}')
+
+        ACPU=$(norm_cpu    "$ACPU_RAW")
+        AMEM=$(norm_mem_gi "$AMEM_RAW")
+        UMEM=$(norm_mem_gi "$MEM_BYTES")
+
+        CPU_LABEL="${CPU_CORES}/${ACPU}"
+        MEM_LABEL="${UMEM}/${AMEM}"
+
+        printf "  %-46s CPU " "$NAME"
+        make_bar "$CPU_VAL"
+        printf " %3s%%  %-18s  MEM " "$CPU_VAL" "$CPU_LABEL"
+        make_bar "$MEM_VAL"
+        printf " %3s%%  %s\n" "$MEM_VAL" "$MEM_LABEL"
+    done
+    exit 0
+fi
+
+# --- METRICS SERVER ---
+if ! kubectl top nodes --request-timeout=2s &>/dev/null; then
+    clear; draw_logo "$VERSION"; draw_status_bar "nodes"
+    echo -e "\n  ${R}${ICON_ERR}${NC} Metrics Server not available or not installed."
+    echo -e "\n  ${D}Install: kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml${NC}"
+    exit 1
+fi
+
+# --- DATA ---
+LIST=$(bash "$SCRIPT_DIR/kli-node" --list)
+if [[ -z "$LIST" ]]; then
+    clear; draw_logo "$VERSION"; draw_status_bar "nodes"
+    echo -e "\n  ${Y}${ICON_WARN}${NC} No nodes found."
+    exit 0
+fi
+
+HEADER=$(printf "  %-46s %-36s %s\n" "NODE" "CPU" "MEMORY")
+NODE_PORT=$(( RANDOM % 20000 + 40000 ))
+NODE_BASE=" esc: return • ctrl+c: quit • enter: pods • ctrl+p: pod top"
+trap "kill $NODE_BG_PID 2>/dev/null" EXIT
+
+(
+    SPIN=('⠋' '⠙' '⠹' '⠸' '⠼' '⠴' '⠦' '⠧' '⠇' '⠏')
+    n=${#SPIN[@]}; idx=0
+    until curl -sf "localhost:$NODE_PORT" -o /dev/null \
+        -d "change-border-label($NODE_BASE • ${SPIN[0]} 15s )" 2>/dev/null; do
+        sleep 0.1
+    done
+    idx=1
+    while true; do
+        for i in $(seq 14 -1 1); do
+            sleep 1
+            curl -s "localhost:$NODE_PORT" -o /dev/null \
+                -d "change-border-label($NODE_BASE • ${SPIN[$((idx % n))]} ${i}s )" 2>/dev/null || true
+            idx=$((idx + 1))
+        done
+        sleep 1
+        curl -s "localhost:$NODE_PORT" -o /dev/null \
+            -d "reload(bash $SCRIPT_DIR/kli-node --list)+change-border-label($NODE_BASE • ↻ refreshing... )" \
+            2>/dev/null || true
+        sleep 0.3
+        curl -s "localhost:$NODE_PORT" -o /dev/null \
+            -d "change-border-label($NODE_BASE • ${SPIN[$((idx % n))]} 15s )" 2>/dev/null || true
+        idx=$((idx + 1))
+    done
+) &
+NODE_BG_PID=$!
+NODE_FOOTER="$NODE_BASE • ⠋ 15s "
+
+# --- INTERFACE ---
+SEL=$(echo "$LIST" | fzf \
+    "${FZF_UI_OPTS[@]}" "${FZF_STYLE_OPTS[@]}" $FZF_COLOR_OPTS \
+    --listen "$NODE_PORT" \
+    --header-label=" KLI : NODES — CLUSTER OVERVIEW " \
+    --input-label=" Search " \
+    --header="$HEADER" \
+    --border-label="$NODE_FOOTER" \
+    --preview-window=down:22:border-top \
+    --preview "bash $SCRIPT_DIR/kli-node --preview {1}" \
+    --bind "ctrl-p:become(bash $SCRIPT_DIR/kli-top)")
+
+if [[ -n "$SEL" ]]; then
+    NODE=$(echo "$SEL" | awk '{print $1}')
+    echo -e "\n${G}${ICON_ARROW}${NC} Drilling into node: ${B}$NODE${NC}"
+    sleep 0.3
+    exec bash "$SCRIPT_DIR/kli-node" --pods "$NODE"
+fi

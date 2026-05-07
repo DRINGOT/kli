@@ -1,0 +1,149 @@
+#!/usr/bin/env bash
+# kli-top - Global Resource Usage Dashboard
+
+SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
+source "$SCRIPT_DIR/kli-ui" || exit 1
+VERSION=$(cat "$SCRIPT_DIR/VERSION" 2>/dev/null || echo "0.2.0")
+
+# --- PREVIEW ---
+if [[ "${1:-}" == "--preview" ]]; then
+    NS="$2"; POD_ARG="$3"
+    if [[ "$POD_ARG" == *..* ]]; then
+        PREFIX="${POD_ARG%..}"
+        POD=$(kubectl get pods -n "$NS" --no-headers 2>/dev/null | \
+            awk -v p="$PREFIX" 'substr($1,1,length(p))==p{print $1; exit}')
+        [[ -z "$POD" ]] && POD="$POD_ARG"
+    else
+        POD="$POD_ARG"
+    fi
+
+    printf "${Y}⚡${NC} ${B}%-40s${NC} ${D}ns: %s${NC}\n" "$POD" "$NS"
+
+    kubectl top pod "$POD" -n "$NS" --no-headers 2>/dev/null | \
+        awk '{printf "   CPU: %-14s Memory: %s\n", $2, $3}'
+
+    kubectl get pod "$POD" -n "$NS" --no-headers 2>/dev/null | \
+        awk '{printf " Status: %-12sReady: %-8s Restarts: %-6s Age: %s\n", $3, $2, $4, $NF}' | smart_color
+
+    containers=$(kubectl get pod "$POD" -n "$NS" \
+        -o jsonpath='{.spec.containers[*].name}' 2>/dev/null | tr ' ' '  ')
+    [[ -n "$containers" ]] && printf "   Containers: ${D}%s${NC}\n" "$containers"
+
+    events=$(kubectl get events -n "$NS" \
+        --field-selector "involvedObject.name=$POD" \
+        --sort-by=.lastTimestamp --no-headers 2>/dev/null | tail -n 3)
+    if [[ -n "$events" ]]; then
+        printf "\n   ${D}Recent events:${NC}\n"
+        echo "$events" | awk '{printf "   %s  %s\n", $5, $6}' | smart_color
+    fi
+    exit 0
+fi
+
+# --- SORT ---
+if [[ "${1:-}" == "--sort" ]]; then
+    COL="${2:-3}"
+    kubectl top pods -A --no-headers 2>/dev/null | sort -rh -k"$COL" | awk '{
+        pod = length($2) > 50 ? substr($2, 1, 50)".." : $2
+        printf "  %-20s %-52s %-10s %s\n", $1, pod, $3, $4
+    }'
+    exit 0
+fi
+
+# --- METRICS SERVER ---
+if ! kubectl top nodes --request-timeout=2s &>/dev/null; then
+    clear; draw_logo "$VERSION"; draw_status_bar "top"
+    echo -e "\n  ${R}${ICON_ERR}${NC} Metrics Server not available or not installed."
+    echo -e "\n  ${D}Install: kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml${NC}"
+    exit 1
+fi
+
+# --- DATA ---
+LIST=$(bash "$SCRIPT_DIR/kli-top" --sort 3)
+if [[ -z "$LIST" ]]; then
+    clear; draw_logo "$VERSION"; draw_status_bar "top"
+    echo -e "\n  ${Y}${ICON_WARN}${NC} No metrics available."
+    exit 0
+fi
+
+HEADER=$(printf "  %-20s %-52s %-10s %s\n" "NAMESPACE" "POD" "CPU" "MEMORY")
+SORT_STATE=$(mktemp)
+echo "3" > "$SORT_STATE"
+FZF_PORT=$(( RANDOM % 20000 + 40000 ))
+trap "rm -f $SORT_STATE; kill $BG_PID 2>/dev/null" EXIT
+
+TOP_BASE=" esc: return • ctrl+c: quit • tab/ctrl+t: toggle CPU/MEM • ctrl+n: nodes"
+
+(
+    SPIN=('⠋' '⠙' '⠹' '⠸' '⠼' '⠴' '⠦' '⠧' '⠇' '⠏')
+    n=${#SPIN[@]}; idx=0
+    until curl -sf "localhost:$FZF_PORT" -o /dev/null \
+        -d "change-border-label($TOP_BASE • ${SPIN[0]} 15s )" 2>/dev/null; do
+        sleep 0.1
+    done
+    idx=1
+    while true; do
+        for i in $(seq 14 -1 1); do
+            sleep 1
+            curl -s "localhost:$FZF_PORT" -o /dev/null \
+                -d "change-border-label($TOP_BASE • ${SPIN[$((idx % n))]} ${i}s )" 2>/dev/null || true
+            idx=$((idx + 1))
+        done
+        sleep 1
+        curl -s "localhost:$FZF_PORT" -o /dev/null \
+            -d "reload(bash $SCRIPT_DIR/kli-top --sort \$(cat $SORT_STATE))+change-border-label($TOP_BASE • ↻ refreshing... )" \
+            2>/dev/null || true
+        sleep 0.3
+        curl -s "localhost:$FZF_PORT" -o /dev/null \
+            -d "change-border-label($TOP_BASE • ${SPIN[$((idx % n))]} 15s )" 2>/dev/null || true
+        idx=$((idx + 1))
+    done
+) &
+BG_PID=$!
+
+TOP_FOOTER="$TOP_BASE • ⠋ 15s "
+
+# --- INTERFACE ---
+SEL=$(echo "$LIST" | fzf \
+    "${FZF_UI_OPTS[@]}" "${FZF_STYLE_OPTS[@]}" $FZF_COLOR_OPTS \
+    --listen "$FZF_PORT" \
+    --header-label=" KLI : TOP — ALL NAMESPACES (sorted by CPU) " \
+    --input-label=" Search " \
+    --header="$HEADER" \
+    --border-label="$TOP_FOOTER" \
+    --preview-window=down:6:border-top \
+    --preview "bash $SCRIPT_DIR/kli-top --preview {1} {2}" \
+    --bind "ctrl-t:transform:
+        s=\$(cat $SORT_STATE)
+        if [[ \$s == 3 ]]; then
+            echo 4 > $SORT_STATE
+            echo 'reload(bash $SCRIPT_DIR/kli-top --sort 4)+change-header-label( KLI : TOP — ALL NAMESPACES (sorted by MEMORY) )'
+        else
+            echo 3 > $SORT_STATE
+            echo 'reload(bash $SCRIPT_DIR/kli-top --sort 3)+change-header-label( KLI : TOP — ALL NAMESPACES (sorted by CPU) )'
+        fi" \
+    --bind "tab:transform:
+        s=\$(cat $SORT_STATE)
+        if [[ \$s == 3 ]]; then
+            echo 4 > $SORT_STATE
+            echo 'reload(bash $SCRIPT_DIR/kli-top --sort 4)+change-header-label( KLI : TOP — ALL NAMESPACES (sorted by MEMORY) )'
+        else
+            echo 3 > $SORT_STATE
+            echo 'reload(bash $SCRIPT_DIR/kli-top --sort 3)+change-header-label( KLI : TOP — ALL NAMESPACES (sorted by CPU) )'
+        fi" \
+    --bind "ctrl-n:become(bash $SCRIPT_DIR/kli-node)")
+
+if [[ -n "$SEL" ]]; then
+    NS=$(echo "$SEL" | awk '{print $1}')
+    POD_ARG=$(echo "$SEL" | awk '{print $2}')
+    if [[ "$POD_ARG" == *..* ]]; then
+        PREFIX="${POD_ARG%..}"
+        FULL_POD=$(kubectl get pods -n "$NS" --no-headers 2>/dev/null | \
+            awk -v p="$PREFIX" 'substr($1,1,length(p))==p{print $1; exit}')
+        POD="${FULL_POD:-$PREFIX}"
+    else
+        POD="$POD_ARG"
+    fi
+    echo -e "\n${G}${ICON_ARROW}${NC} Jumping to: ${B}$POD${NC} ${D}in${NC} ${CY}$NS${NC}"
+    sleep 0.3
+    exec "$SCRIPT_DIR/kli" -n "$NS" --pod "$POD" --back "kli-top"
+fi
