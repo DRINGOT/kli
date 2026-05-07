@@ -6,7 +6,6 @@ source "$SCRIPT_DIR/kli-ui" || exit 1
 
 MODE="$1"; TARGET="$2"; NAME="$3"; NS="$4"
 
-# --- LOGIQUE NAMESPACE ---
 if [[ -z "$NS" ]]; then
     if [[ "$MODE" != "preview" && -n "$NAME" ]]; then NS="$NAME"; NAME=""; else NS="default"; fi
 fi
@@ -27,18 +26,144 @@ case "$MODE" in
         ;;
 
     "preview")
-        echo -e "${G}${ICON_PREFIX}${NC} ${B}Details: $TARGET/$NAME ${D}(NS: $NS)${NC}"
-        draw_line "Details for $TARGET/$NAME in $NS"
+        if [[ "$NAME" == "ALL" ]]; then
+            echo -e "${G}${ICON_PREFIX}${NC} ${B}All $TARGET in ${CY}$NS${NC}"
+            draw_line "kubectl get $TARGET -n $NS"
+            kubectl get "$TARGET" -n "$NS" -o wide 2>/dev/null | head -n 40 | smart_color
+        else
+            echo -e "${G}${ICON_PREFIX}${NC} ${B}Details: $TARGET/$NAME ${D}(NS: $NS)${NC}"
+            draw_line "Details for $TARGET/$NAME in $NS"
 
-        if [[ "$TARGET" =~ ^pod ]]; then
-            echo -e "${BL}${ICON_PREFIX}${NC} ${B}Recent Logs (Last 20 lines):${NC}"
-            kubectl logs "$NAME" -n "$NS" --tail=20 2>/dev/null | sed 's/^/  /'
-            echo -e "${D}────────────────────────────────────────────────────────────${NC}"
+            if [[ "$TARGET" =~ ^pod ]]; then
+                echo -e "${BL}${ICON_PREFIX}${NC} ${B}Recent Logs (Last 20 lines):${NC}"
+                kubectl logs "$NAME" -n "$NS" --tail=20 2>/dev/null | sed 's/^/  /'
+                echo -e "${D}────────────────────────────────────────────────────────────${NC}"
+            fi
+
+            kubectl describe "$TARGET" "$NAME" -n "$NS" 2>/dev/null | \
+                head -n 120 | \
+                sed -E "s/^([ ]*[a-zA-Z0-9 ]+:)/${D}\1${NC}/" | \
+                smart_color
         fi
+        ;;
 
-        kubectl describe "$TARGET" "$NAME" -n "$NS" 2>/dev/null | \
-            head -n 120 | \
-            sed -E "s/^([ ]*[a-zA-Z0-9 ]+:)/${D}\1${NC}/" | \
-            smart_color
+    "action")
+        case "$TARGET" in
+            "get")
+                echo -e "${G}${ICON_PREFIX}${NC} ${B}GET${NC}"
+                draw_line "kubectl get <resource> -n <namespace>"
+                echo -e "  List all instances of a resource type."
+                echo -e "  Shows name, status, restarts, age and more.\n"
+                echo -e "${D}Example:${NC}"
+                echo -e "  ${CY}kubectl get pods -n production${NC}"
+                echo -e "  ${CY}kubectl get deployments -n staging${NC}\n"
+                echo -e "${D}Tip: use ${B}describe${NC}${D} to get full details on one item.${NC}"
+                ;;
+            "describe")
+                echo -e "${BL}${ICON_PREFIX}${NC} ${B}DESCRIBE${NC}"
+                draw_line "kubectl describe <resource> <name> -n <namespace>"
+                echo -e "  Full details about a specific resource:\n"
+                echo -e "  ${G}${ICON_ARROW}${NC} Events (errors, scheduling, restarts)"
+                echo -e "  ${G}${ICON_ARROW}${NC} Conditions and probe status"
+                echo -e "  ${G}${ICON_ARROW}${NC} Volume mounts & environment variables"
+                echo -e "  ${G}${ICON_ARROW}${NC} Labels & annotations\n"
+                echo -e "${Y}${ICON_WARN}${NC} ${D}Best action to diagnose a failing pod.${NC}"
+                ;;
+            "logs")
+                echo -e "${CY}${ICON_PREFIX}${NC} ${B}LOGS${NC}"
+                draw_line "kubectl logs -f <pod> -n <namespace>"
+                echo -e "  Streams the stdout/stderr output of a container.\n"
+                echo -e "  ${G}${ICON_ARROW}${NC} Follows output in real-time (live)"
+                echo -e "  ${G}${ICON_ARROW}${NC} Shows application print/log output"
+                echo -e "  ${G}${ICON_ARROW}${NC} Press ${B}Ctrl+C${NC} to stop\n"
+                echo -e "${Y}${ICON_WARN}${NC} ${D}Only available for Pods.${NC}"
+                ;;
+            "edit")
+                echo -e "${Y}${ICON_PREFIX}${NC} ${B}EDIT${NC}"
+                draw_line "kubectl edit <resource> <name> -n <namespace>"
+                echo -e "  Opens the resource YAML in your \$EDITOR (vi by default)."
+                echo -e "  Save and quit to apply changes immediately.\n"
+                echo -e "  ${G}${ICON_ARROW}${NC} Modify replicas, env vars, resource limits"
+                echo -e "  ${G}${ICON_ARROW}${NC} Update labels or annotations\n"
+                echo -e "${R}${ICON_WARN}${NC} ${D}Changes apply live to the cluster — be careful!${NC}"
+                ;;
+            "top")
+                echo -e "${Y}${ICON_PREFIX}${NC} ${B}TOP${NC}"
+                draw_line "kubectl top <resource> -n <namespace>"
+                echo -e "  Real-time CPU and Memory usage.\n"
+                echo -e "  ${G}${ICON_ARROW}${NC} Works for pods and nodes"
+                echo -e "  ${G}${ICON_ARROW}${NC} Identify resource-hungry containers\n"
+                echo -e "${D}Requires Metrics Server to be installed on the cluster.${NC}"
+                ;;
+            "exec")
+                echo -e "${G}${ICON_PREFIX}${NC} ${B}EXEC${NC}"
+                draw_line "kubectl exec -it <pod> -n <namespace> -- sh"
+                echo -e "  Open an interactive shell inside a running container.\n"
+                echo -e "  ${G}${ICON_ARROW}${NC} Inspect files, run commands, debug live"
+                echo -e "  ${G}${ICON_ARROW}${NC} Auto-selects container if only one"
+                echo -e "  ${G}${ICON_ARROW}${NC} Prompts container selection if multiple\n"
+                echo -e "${Y}${ICON_WARN}${NC} ${D}Only available for running Pods.${NC}"
+                ;;
+            "delete")
+                echo -e "${R}${ICON_PREFIX}${NC} ${B}DELETE${NC}"
+                draw_line "kubectl delete <resource> <name> -n <namespace>"
+                echo -e "  Permanently deletes a resource from the cluster.\n"
+                echo -e "  ${G}${ICON_ARROW}${NC} Pods managed by a Deployment restart automatically"
+                echo -e "  ${G}${ICON_ARROW}${NC} Deleting a Deployment removes all its pods"
+                echo -e "  ${R}${ICON_ARROW}${NC} PVC deletion may destroy persistent data\n"
+                echo -e "${R}${ICON_ERR}${NC} ${B}Irreversible. Use with care in production.${NC}"
+                ;;
+            "explain")
+                echo -e "${BL}${ICON_PREFIX}${NC} ${B}EXPLAIN${NC}"
+                draw_line "kubectl explain <resource>"
+                echo -e "  API documentation for any Kubernetes resource type.\n"
+                echo -e "  ${G}${ICON_ARROW}${NC} Lists all available fields and their types"
+                echo -e "  ${G}${ICON_ARROW}${NC} Useful for writing YAML manifests"
+                echo -e "  ${G}${ICON_ARROW}${NC} Works on nested fields too\n"
+                echo -e "${D}Example: ${CY}kubectl explain deployment.spec.template${NC}\n"
+                echo -e "${ICON_INFO} ${D}No specific instance needed — works on resource type.${NC}"
+                ;;
+            "rollout")
+                echo -e "${CY}${ICON_PREFIX}${NC} ${B}ROLLOUT${NC}"
+                draw_line "kubectl rollout <subcommand> <deployment> -n <namespace>"
+                echo -e "  Manage the lifecycle of a Deployment rollout.\n"
+                echo -e "  ${G}status${NC}   ${D}Watch rollout progress live${NC}"
+                echo -e "  ${G}history${NC}  ${D}View revision history${NC}"
+                echo -e "  ${G}restart${NC}  ${D}Rolling restart (zero downtime)${NC}"
+                echo -e "  ${G}undo${NC}     ${D}Rollback to the previous version${NC}\n"
+                echo -e "${D}Mainly used for Deployments and StatefulSets.${NC}"
+                ;;
+            "port-forward")
+                echo -e "${CY}${ICON_PREFIX}${NC} ${B}PORT-FORWARD${NC}"
+                draw_line "kubectl port-forward <resource>/<name> <local>:<remote> -n <ns>"
+                echo -e "  Forward a local port to a port on a pod or service.\n"
+                echo -e "  ${G}${ICON_ARROW}${NC} Access services without exposing them publicly"
+                echo -e "  ${G}${ICON_ARROW}${NC} Works on pods and services"
+                echo -e "  ${G}${ICON_ARROW}${NC} Press ${B}Ctrl+C${NC} to stop\n"
+                echo -e "${D}Example: ${CY}kubectl port-forward pod/myapp-xxx 8080:80${NC}\n"
+                echo -e "${ICON_INFO} ${D}Will prompt for ports after selecting instance.${NC}"
+                ;;
+            "events")
+                echo -e "${Y}${ICON_PREFIX}${NC} ${B}EVENTS${NC}"
+                draw_line "kubectl get events -n <namespace> --sort-by=.lastTimestamp"
+                echo -e "  Lists all recent events in the namespace, sorted by time.\n"
+                echo -e "  ${G}${ICON_ARROW}${NC} First thing to check when a pod doesn't start"
+                echo -e "  ${G}${ICON_ARROW}${NC} Shows scheduling, image pull, and crash reasons"
+                echo -e "  ${G}${ICON_ARROW}${NC} Covers all resources in the namespace\n"
+                echo -e "${ICON_INFO} ${D}No instance needed — shows the whole namespace.${NC}"
+                ;;
+            "scale")
+                echo -e "${G}${ICON_PREFIX}${NC} ${B}SCALE${NC}"
+                draw_line "kubectl scale <resource> <name> --replicas=N -n <namespace>"
+                echo -e "  Adjust the number of running replicas.\n"
+                echo -e "  ${G}${ICON_ARROW}${NC} Scale up   → more replicas for capacity"
+                echo -e "  ${G}${ICON_ARROW}${NC} Scale down → fewer replicas to save resources"
+                echo -e "  ${G}${ICON_ARROW}${NC} Set to 0 to pause a service entirely\n"
+                echo -e "${Y}${ICON_WARN}${NC} ${D}A HorizontalPodAutoscaler may override manual scaling.${NC}"
+                ;;
+            *)
+                echo -e "${D}${ICON_PREFIX} Select an action to see its description.${NC}"
+                ;;
+        esac
         ;;
 esac

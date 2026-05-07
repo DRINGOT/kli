@@ -3,12 +3,130 @@
 
 SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
 source "$SCRIPT_DIR/kli-ui" || exit 1
-VERSION=$(cat "$SCRIPT_DIR/VERSION" 2>/dev/null || echo "0.0.1")
+VERSION=$(cat "$SCRIPT_DIR/VERSION" 2>/dev/null || echo "0.2.0")
 
-# --- GESTION DU SIGNAL DE SORTIE (Ctrl+C) ---
+# --- HOME PREVIEW ---
+if [[ "${1:-}" == "--home-preview" ]]; then
+    case "${2:-}" in
+        *"COMMAND EXPLORER"*|*COMMAND*)
+            printf "${B}Command Explorer${NC}\n\n"
+            printf "  Navigate your cluster interactively.\n\n"
+            printf "  ${G}›${NC} Select a namespace\n"
+            printf "  ${G}›${NC} Choose an action:\n"
+            printf "    ${D}get · describe · logs · exec${NC}\n"
+            printf "    ${D}port-forward · edit · delete…${NC}\n"
+            printf "  ${G}›${NC} Pick a resource type & instance\n\n"
+            printf "  ${D}Supports pods, deployments, services,\n  ingress, configmaps, secrets, jobs…${NC}\n"
+            ;;
+        *CONTEXT*)
+            printf "${B}Switch Context${NC}\n\n"
+            printf "  Browse and switch kubectl contexts\n"
+            printf "  (clusters / cloud environments).\n\n"
+            printf "  ${G}›${NC} Highlights the current active context\n"
+            printf "  ${G}›${NC} Preview shows nodes & namespaces\n"
+            printf "  ${G}›${NC} Takes effect immediately\n"
+            ;;
+        *NAMESPACE*)
+            printf "${B}Switch Namespace${NC}\n\n"
+            printf "  Quickly change the active namespace\n"
+            printf "  within the current context.\n\n"
+            printf "  ${G}›${NC} Highlights the current namespace\n"
+            printf "  ${G}›${NC} Preview shows resource counts\n"
+            printf "  ${G}›${NC} Takes effect for all future commands\n"
+            ;;
+        *"TOP RESOURCES"*)
+            printf "${B}Top Resources${NC}\n\n"
+            printf "  Live CPU & Memory across all pods\n"
+            printf "  in all namespaces.\n\n"
+            printf "  ${G}›${NC} ${D}tab/ctrl+t${NC}  toggle sort CPU ↔ MEM\n"
+            printf "  ${G}›${NC} ${D}enter${NC}         jump to pod actions\n"
+            printf "  ${G}›${NC} ${D}ctrl+n${NC}        node view\n"
+            ;;
+        *"TOP NODES"*)
+            printf "${B}Top Nodes${NC}\n\n"
+            printf "  Cluster-level node resource dashboard.\n\n"
+            printf "  ${G}›${NC} CPU & RAM bars with used/allocatable\n"
+            printf "  ${G}›${NC} Requests & limits per node\n"
+            printf "  ${G}›${NC} ${D}enter${NC}   drill into pods on that node\n"
+            printf "  ${G}›${NC} ${D}ctrl+p${NC}  global pod top\n"
+            ;;
+        *FINDER*)
+            printf "${B}Finder${NC}\n\n"
+            printf "  Search any resource type across\n"
+            printf "  all namespaces at once.\n\n"
+            printf "  ${G}›${NC} Pick a resource type:\n"
+            printf "    ${D}pods · deployments · services${NC}\n"
+            printf "    ${D}ingress · configmaps · secrets…${NC}\n"
+            printf "  ${G}›${NC} ${D}enter${NC}  jump to action menu\n"
+            printf "  ${G}›${NC} ${D}esc${NC}    change resource type\n"
+            ;;
+    esac
+    exit 0
+fi
+
+# --- INFO PAGE  ---
+if [[ "${1:-}" == "--info" ]]; then
+    VER=$(cat "$SCRIPT_DIR/VERSION" 2>/dev/null || echo "0.2.0")
+    {
+        printf "\n  ${B}kli  v%s${NC}   —   Kubernetes CLI Interface\n" "$VER"
+        printf "  ${D}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
+        printf "\n  ${B}USAGE${NC}\n"
+        printf "    ${D}kli [options] [command]${NC}\n"
+        printf "\n  ${B}OPTIONS${NC}\n"
+        printf "    ${G}%-22s${NC}  %s\n" "-n, --namespace <ns>"  "Set initial namespace"
+        printf "    ${G}%-22s${NC}  %s\n" "--explorer"            "Jump directly to resource explorer"
+        printf "    ${G}%-22s${NC}  %s\n" "--pod <name>"          "Jump to action menu for a specific pod"
+        printf "    ${G}%-22s${NC}  %s\n" "--resource <type>"     "Pre-select resource type (with --instance)"
+        printf "    ${G}%-22s${NC}  %s\n" "--instance <name>"     "Pre-select resource instance"
+        printf "    ${G}%-22s${NC}  %s\n" "-h, --help"            "Show this help"
+        printf "    ${G}%-22s${NC}  %s\n" "-v, --version"         "Show version"
+        printf "\n  ${B}COMMANDS${NC}\n"
+        printf "    ${G}%-22s${NC}  %s\n" "ctx"             "Switch cluster context"
+        printf "    ${G}%-22s${NC}  %s\n" "ns"              "Switch active namespace"
+        printf "    ${G}%-22s${NC}  %s\n" "top"             "Live pod CPU/MEM usage  (all namespaces, auto-refresh 15s)"
+        printf "    ${G}%-22s${NC}  %s\n" "nodes"           "Cluster node resource overview  (auto-refresh 15s)"
+        printf "    ${G}%-22s${NC}  %s\n" "find [resource]" "Search resources across all namespaces"
+        printf "\n  ${B}EXPLORER ACTIONS${NC}\n"
+        printf "    ${G}%-22s${NC}  %s\n" "get"          "List and filter resources"
+        printf "    ${G}%-22s${NC}  %s\n" "describe"     "Full details, events & conditions"
+        printf "    ${G}%-22s${NC}  %s\n" "logs"         "Stream container logs  (pods only)"
+        printf "    ${G}%-22s${NC}  %s\n" "exec"         "Open a shell inside a container"
+        printf "    ${G}%-22s${NC}  %s\n" "port-forward" "Forward a local port to a pod / service"
+        printf "    ${G}%-22s${NC}  %s\n" "edit"         "Edit resource YAML in your editor"
+        printf "    ${G}%-22s${NC}  %s\n" "top"          "Live CPU & Memory metrics"
+        printf "    ${G}%-22s${NC}  %s\n" "delete"       "Delete a resource"
+        printf "    ${G}%-22s${NC}  %s\n" "scale"        "Adjust replica count"
+        printf "    ${G}%-22s${NC}  %s\n" "rollout"      "Manage deployment rollouts  (restart, status, history, undo)"
+        printf "    ${G}%-22s${NC}  %s\n" "events"       "Recent events in namespace  (no instance needed)"
+        printf "    ${G}%-22s${NC}  %s\n" "explain"      "API documentation  (no instance needed)"
+        printf "\n  ${B}KEYBOARD SHORTCUTS${NC}\n"
+        printf "    ${D}Top Resources   ${NC}  ${Y}%-18s${NC}  %s\n" "tab/ctrl+t"  "Toggle sort CPU ↔ MEM"
+        printf "    ${D}                ${NC}  ${Y}%-18s${NC}  %s\n" "ctrl+n"        "Switch to node view"
+        printf "    ${D}                ${NC}  ${Y}%-18s${NC}  %s\n" "enter"         "Jump to pod action menu"
+        printf "    ${D}Top Nodes       ${NC}  ${Y}%-18s${NC}  %s\n" "enter"         "Drill into pods on node"
+        printf "    ${D}                ${NC}  ${Y}%-18s${NC}  %s\n" "ctrl+p"        "Switch to pod top view"
+        printf "    ${D}Finder          ${NC}  ${Y}%-18s${NC}  %s\n" "esc"           "Change resource type"
+        printf "    ${D}Global          ${NC}  ${Y}%-18s${NC}  %s\n" "esc"           "Return to previous screen"
+        printf "    ${D}                ${NC}  ${Y}%-18s${NC}  %s\n" "ctrl+c"        "Quit kli"
+        printf "\n  ${B}REQUIREMENTS${NC}\n"
+        printf "    ${G}%-22s${NC}  %s\n" "kubectl"  "required"
+        printf "    ${G}%-22s${NC}  %s\n" "fzf"      "required  (>= 0.36)"
+        printf "    ${G}%-22s${NC}  %s\n" "curl"     "required  (live refresh)"
+        printf "    ${G}%-22s${NC}  %s\n" "jq"       "optional  (node resource requests / limits)"
+        printf "\n"
+    } | fzf \
+        "${FZF_UI_OPTS[@]}" "${FZF_STYLE_OPTS[@]}" $FZF_COLOR_OPTS \
+        --ansi --disabled --no-sort --no-info --no-mouse --no-input \
+        --pointer=" " \
+        --color="current-bg:-1,current-fg:-1" \
+        --header-label=" KLI v$VER — INFO & HELP " \
+        --border-label=" esc/enter: return "
+    exit 0
+fi
+
 trap "clear; exit 0" SIGINT SIGTERM
 
-# --- LOGIQUE INTERNE ---
+# --- INTERNAL LOGIC ---
 show_help() {
     draw_logo "$VERSION"
     echo -e "
@@ -24,7 +142,9 @@ ${B}OPTIONS:${NC}
 ${B}COMMANDS:${NC}
   ctx                    Switch cluster context
   ns                     Quick namespace switch
-  run                    Start the demo/wizard mode
+  top                    Global resource usage (pods, all namespaces)
+  nodes                  Cluster node overview with CPU/RAM bars
+  find [resource]        Cross-namespace resource search (default: pods)
     "
     exit 0
 }
@@ -39,14 +159,21 @@ check_cluster_connection() {
 
 # --- PARSING ---
 NAMESPACE=""; NS_PROVIDED=false; GOTO_EXPLORER=false
+PRE_RESOURCE=""; PRE_INSTANCE=""; INSTANCE_PROVIDED=false
 while [[ $# -gt 0 ]]; do
     case "$1" in
         -h|--help) show_help ;;
         -v|--version) echo "kli version $VERSION"; exit 0 ;;
-        --explorer) GOTO_EXPLORER=true; shift ;;
-        ctx) [[ -f "$SCRIPT_DIR/kli-ctx" ]] && exec "$SCRIPT_DIR/kli-ctx" || exec kli-ctx ;;
-        ns) [[ -f "$SCRIPT_DIR/kli-ns" ]] && exec "$SCRIPT_DIR/kli-ns" || exec kli-ns ;;
-        run) [[ -f "$SCRIPT_DIR/kli-run" ]] && exec "$SCRIPT_DIR/kli-run" || exec kli-run ;;
+        --explorer)  GOTO_EXPLORER=true; shift ;;
+        --pod)       PRE_RESOURCE="pods"; PRE_INSTANCE="$2"; INSTANCE_PROVIDED=true; shift 2 ;;
+        --resource)  PRE_RESOURCE="$2"; shift 2 ;;
+        --instance)  PRE_INSTANCE="$2"; INSTANCE_PROVIDED=true; shift 2 ;;
+        --back)      BACK_CMD="$2"; shift 2 ;;
+        ctx)   [[ -f "$SCRIPT_DIR/kli-ctx" ]] && exec "$SCRIPT_DIR/kli-ctx" || exec kli-ctx ;;
+        ns)    [[ -f "$SCRIPT_DIR/kli-ns"  ]] && exec "$SCRIPT_DIR/kli-ns"  || exec kli-ns ;;
+        top)   [[ -f "$SCRIPT_DIR/kli-top"  ]] && exec "$SCRIPT_DIR/kli-top"  || exec kli-top ;;
+        nodes) [[ -f "$SCRIPT_DIR/kli-node" ]] && exec "$SCRIPT_DIR/kli-node" || exec kli-node ;;
+        find)  shift; [[ -f "$SCRIPT_DIR/kli-find" ]] && exec "$SCRIPT_DIR/kli-find" "$@" || exec kli-find "$@" ;;
         -n|--namespace) NAMESPACE="$2"; NS_PROVIDED=true; shift 2 ;;
         *) shift ;;
     esac
@@ -57,36 +184,46 @@ clear
 draw_logo "$VERSION"
 
 STEP="HOME"
-[[ "$NS_PROVIDED" == "true" || "$GOTO_EXPLORER" == "true" ]] && STEP="NAMESPACE"
+if [[ "$INSTANCE_PROVIDED" == "true" && -n "$PRE_RESOURCE" && -n "$PRE_INSTANCE" ]]; then
+    RESOURCE="$PRE_RESOURCE"
+    INSTANCE="$PRE_INSTANCE"
+    STEP="ACTION"
+elif [[ "$NS_PROVIDED" == "true" || "$GOTO_EXPLORER" == "true" ]]; then
+    STEP="NAMESPACE"
+fi
 
 while true; do
     case "$STEP" in
         "HOME")
-            SEL=$(echo -e "  START EXPLORER\n  SWITCH CONTEXT\n  SWITCH NAMESPACE\n  RUN WIZARD" | \
+            SEL=$(echo -e "  COMMAND EXPLORER\n  FINDER\n  SWITCH CONTEXT\n  SWITCH NAMESPACE\n  TOP NODES\n  TOP RESOURCES" | \
                 fzf "${FZF_UI_OPTS[@]}" "${FZF_STYLE_OPTS[@]}" $FZF_COLOR_OPTS \
-                --header-label=" KLI : MAIN MENU " --input-label=" HOME ")
+                --ansi \
+                --header-label=" KLI : MAIN MENU " --input-label=" HOME " \
+                --border-label=" esc/ctrl+c: quit • ctrl+h: help " \
+                --preview-window=right:45%:border-left:wrap \
+                --preview "bash $SCRIPT_DIR/kli --home-preview {}" \
+                --bind "ctrl-h:execute(bash $SCRIPT_DIR/kli --info)")
 
             STATUS=$?
             [[ $STATUS -eq 10 || -z "$SEL" ]] && exit 0
 
             case "$SEL" in
-                *"START EXPLORER"*)  STEP="NAMESPACE" ;;
-                *"SWITCH CONTEXT"*)  exec "$SCRIPT_DIR/kli-ctx" ;;
-                *"SWITCH NAMESPACE"*) exec "$SCRIPT_DIR/kli-ns" ;;
-                *"RUN WIZARD"*)      exec "$SCRIPT_DIR/kli-run" ;;
+                *"COMMAND EXPLORER"*)  STEP="NAMESPACE"; continue ;;
+                *"FINDER"*)            "$SCRIPT_DIR/kli-find" ;;
+                *"SWITCH CONTEXT"*)    "$SCRIPT_DIR/kli-ctx" ;;
+                *"SWITCH NAMESPACE"*)  "$SCRIPT_DIR/kli-ns" ;;
+                *"TOP NODES"*)         "$SCRIPT_DIR/kli-node" ;;
+                *"TOP RESOURCES"*)     "$SCRIPT_DIR/kli-top" ;;
             esac
+            STEP="HOME"
             ;;
 
         "NAMESPACE")
-            # 1. On récupère le NS actuel
             CUR_NS=$(kubectl config view --minify --output 'jsonpath={..namespace}' 2>/dev/null || echo "default")
 
-            # 2. Génération de la liste avec tes variables de couleurs {B} et {G}
-            # On met le NS actuel en Gras {B} et Vert {G}
             NS_LIST=$(kubectl get namespaces -o name 2>/dev/null | sed 's/namespace\///' | sort | \
                 sed "s/^$CUR_NS$/${B}${G}$CUR_NS (current)${NC}/")
 
-            # 3. Appel FZF avec la preview de kli-ns
             SEL_NS=$(echo -e "$NS_LIST" | fzf "${FZF_UI_OPTS[@]}" "${FZF_STYLE_OPTS[@]}" $FZF_COLOR_OPTS $FZF_PREVIEW_OPTS \
                 --ansi \
                 --header-label=" Current: $CUR_NS " \
@@ -95,11 +232,9 @@ while true; do
 
             STATUS=$?
 
-            # 4. Logique de navigation
             if [[ $STATUS -eq 10 || -z "$SEL_NS" ]]; then
                 STEP="HOME"
             else
-                # Nettoyage strict (enlève le texte ET les codes couleurs injectés par {B}{G})
                 NAMESPACE=$(echo "$SEL_NS" | sed 's/ (current)//g' | sed 's/\x1b\[[0-9;]*m//g')
                 STEP="ACTION"
             fi
@@ -107,21 +242,68 @@ while true; do
 
 
         "ACTION")
-            VERBS="get\ndescribe\nlogs\nedit\ntop\ndelete\nexplain\nrollout\nscale"
-            ACTION=$(echo -e "$VERBS" | fzf "${FZF_UI_OPTS[@]}" "${FZF_STYLE_OPTS[@]}" $FZF_COLOR_OPTS \
-                --header-label=" NS: $NAMESPACE " --input-label=" ACTION ")
+            VERBS=$(printf "%-14s  %s\n" \
+                "get"          "List and filter resources" \
+                "describe"     "Full details, events & conditions" \
+                "logs"         "Stream container logs  (pods only)" \
+                "exec"         "Open a shell inside a container" \
+                "port-forward" "Forward a local port to a pod or service" \
+                "edit"         "Edit resource YAML in your editor" \
+                "top"          "Live CPU & Memory metrics" \
+                "delete"       "Permanently delete a resource" \
+                "explain"      "API documentation  (no instance needed)" \
+                "events"       "Recent events in namespace  (no instance needed)" \
+                "rollout"      "Manage deployment rollouts" \
+                "scale"        "Adjust replica count")
+
+            if [[ "$INSTANCE_PROVIDED" == "true" ]]; then
+                ACTION_LABEL=" $RESOURCE · $INSTANCE · ns: $NAMESPACE "
+            else
+                ACTION_LABEL=" ns: $NAMESPACE "
+            fi
+
+            ACTION_SEL=$(echo "$VERBS" | fzf "${FZF_UI_OPTS[@]}" "${FZF_STYLE_OPTS[@]}" $FZF_COLOR_OPTS \
+                --header-label="$ACTION_LABEL" --input-label=" ACTION " \
+                --preview-window=right:60%:border-left:wrap \
+                --preview "bash $SCRIPT_DIR/kli-engine action {1}")
 
             STATUS=$?
-            if [[ $STATUS -eq 10 || -z "$ACTION" ]]; then STEP="NAMESPACE"; else STEP="RESOURCE"; fi
+            if [[ $STATUS -eq 10 || -z "$ACTION_SEL" ]]; then
+                if [[ "$INSTANCE_PROVIDED" == "true" ]]; then
+                    INSTANCE_PROVIDED=false; RESOURCE=""; INSTANCE=""; STEP="HOME"
+                else
+                    STEP="NAMESPACE"
+                fi
+            else
+                ACTION=$(echo "$ACTION_SEL" | awk '{print $1}')
+                if [[ "$ACTION" == "events" ]]; then
+                    STEP="FINISH"
+                elif [[ "$INSTANCE_PROVIDED" == "true" ]]; then
+                    case "$ACTION" in
+                        exec)         STEP="EXEC_SHELL" ;;
+                        logs)         STEP="LOGS_CONTAINER" ;;
+                        get)          STEP="GET_FORMAT" ;;
+                        rollout)      STEP="ROLLOUT_SUB" ;;
+                        scale)        STEP="SCALE_REPLICAS" ;;
+                        port-forward) STEP="PORT_FORWARD" ;;
+                        *)            STEP="FINISH" ;;
+                    esac
+                else
+                    STEP="RESOURCE"
+                fi
+            fi
             ;;
 
         "RESOURCE")
-            # Récupération dynamique
-            RES_LIST=$(kubectl api-resources --verb="$ACTION" --namespaced=true -o name 2>/dev/null | sed 's/\..*//' | sort -u)
-
-            # Fallback si vide (ton Top 15)
-            if [[ -z "$RES_LIST" ]]; then
-                RES_LIST=$(echo -e "pods\ndeployments\nrollouts\nservices\ningress\nconfigmaps\nsecrets\nstatefulsets\nreplicasets\njobs\ncronjobs\nhorizontalpodautoscalers\npersistentvolumeclaims\npersistentvolumes\nendpoints")
+            if [[ "$ACTION" == "logs" || "$ACTION" == "exec" ]]; then
+                RES_LIST="pods"
+            elif [[ "$ACTION" == "port-forward" ]]; then
+                RES_LIST=$'pods\nservices'
+            else
+                RES_LIST=$(kubectl api-resources --verb="$ACTION" --namespaced=true -o name 2>/dev/null | sed 's/\..*//' | sort -u)
+                if [[ -z "$RES_LIST" ]]; then
+                    RES_LIST=$(echo -e "pods\ndeployments\nrollouts\nservices\ningress\nconfigmaps\nsecrets\nstatefulsets\nreplicasets\njobs\ncronjobs\nhorizontalpodautoscalers\npersistentvolumeclaims\npersistentvolumes\nendpoints\nevents")
+                fi
             fi
 
             RESOURCE=$(echo -e "$RES_LIST" | fzf "${FZF_UI_OPTS[@]}" "${FZF_STYLE_OPTS[@]}" $FZF_COLOR_OPTS $FZF_PREVIEW_OPTS \
@@ -144,12 +326,136 @@ while true; do
                 sleep 1; STEP="RESOURCE"; continue
             fi
 
+            [[ "$ACTION" == "get" ]] && INS_LIST=$(printf "ALL\n%s" "$INS_LIST")
+
             INSTANCE=$(echo -e "$INS_LIST" | fzf "${FZF_UI_OPTS[@]}" "${FZF_STYLE_OPTS[@]}" $FZF_COLOR_OPTS $FZF_PREVIEW_OPTS \
                 --header-label=" $NAMESPACE / $RESOURCE " --input-label=" INSTANCE " \
                 --preview "bash $SCRIPT_DIR/kli-engine preview $RESOURCE {} $NAMESPACE")
 
             STATUS=$?
-            if [[ $STATUS -eq 10 || -z "$INSTANCE" ]]; then STEP="RESOURCE"; else STEP="FINISH"; fi
+            if [[ $STATUS -eq 10 || -z "$INSTANCE" ]]; then
+                STEP="RESOURCE"
+            elif [[ "$ACTION" == "rollout" ]]; then
+                STEP="ROLLOUT_SUB"
+            elif [[ "$ACTION" == "scale" ]]; then
+                STEP="SCALE_REPLICAS"
+            elif [[ "$ACTION" == "exec" ]]; then
+                STEP="EXEC_SHELL"
+            elif [[ "$ACTION" == "logs" ]]; then
+                STEP="LOGS_CONTAINER"
+            elif [[ "$ACTION" == "get" ]]; then
+                STEP="GET_FORMAT"
+            elif [[ "$ACTION" == "port-forward" ]]; then
+                STEP="PORT_FORWARD"
+            else
+                STEP="FINISH"
+            fi
+            ;;
+
+        "ROLLOUT_SUB")
+            SUBS=$(printf "%-10s  %s\n" \
+                "restart" "Rolling restart (zero downtime)" \
+                "status"  "Watch rollout progress" \
+                "history" "View revision history" \
+                "undo"    "Rollback to previous version")
+
+            ROLLOUT_SEL=$(echo "$SUBS" | fzf "${FZF_UI_OPTS[@]}" "${FZF_STYLE_OPTS[@]}" $FZF_COLOR_OPTS \
+                --header-label=" $RESOURCE / $INSTANCE " --input-label=" ROLLOUT ")
+
+            STATUS=$?
+            if [[ $STATUS -eq 10 || -z "$ROLLOUT_SEL" ]]; then
+                STEP="INSTANCE"
+            else
+                ROLLOUT_ACTION=$(echo "$ROLLOUT_SEL" | awk '{print $1}')
+                STEP="FINISH"
+            fi
+            ;;
+
+        "SCALE_REPLICAS")
+            clear
+            draw_status_bar "scale $RESOURCE"
+            CURRENT=$(kubectl get "$RESOURCE" "$INSTANCE" -n "$NAMESPACE" \
+                -o jsonpath='{.spec.replicas}' 2>/dev/null || echo "?")
+            echo -e "\n  ${B}$RESOURCE${NC}${D}/${NC}${CY}$INSTANCE${NC}  ${D}(ns: $NAMESPACE)${NC}"
+            echo -e "  ${D}Current replicas:${NC} ${B}$CURRENT${NC}\n"
+            echo -n "  New replica count: "
+            read -r REPLICAS
+            if [[ -z "$REPLICAS" || ! "$REPLICAS" =~ ^[0-9]+$ ]]; then
+                STEP="INSTANCE"
+            else
+                STEP="FINISH"
+            fi
+            ;;
+
+        "EXEC_SHELL")
+            CONTAINERS=$(kubectl get pod "$INSTANCE" -n "$NAMESPACE" \
+                -o jsonpath='{.spec.containers[*].name}' 2>/dev/null)
+            CONTAINER_COUNT=$(echo "$CONTAINERS" | wc -w | tr -d ' ')
+            CONTAINER_FLAG=""
+
+            if [[ "$CONTAINER_COUNT" -gt 1 ]]; then
+                CONTAINER=$(echo "$CONTAINERS" | tr ' ' '\n' | \
+                    fzf "${FZF_UI_OPTS[@]}" "${FZF_STYLE_OPTS[@]}" $FZF_COLOR_OPTS \
+                    --header-label=" POD: $INSTANCE " --input-label=" SELECT CONTAINER ")
+                STATUS=$?
+                if [[ $STATUS -eq 10 || -z "$CONTAINER" ]]; then
+                    STEP="INSTANCE"; continue
+                fi
+                CONTAINER_FLAG="-c $CONTAINER"
+            fi
+            STEP="FINISH"
+            ;;
+
+        "LOGS_CONTAINER")
+            CONTAINERS=$(kubectl get pod "$INSTANCE" -n "$NAMESPACE" \
+                -o jsonpath='{.spec.containers[*].name}' 2>/dev/null)
+            CONTAINER_COUNT=$(echo "$CONTAINERS" | wc -w | tr -d ' ')
+            LOG_CONTAINER_FLAG=""
+
+            if [[ "$CONTAINER_COUNT" -gt 1 ]]; then
+                LOG_CONTAINER=$(echo "$CONTAINERS" | tr ' ' '\n' | \
+                    fzf "${FZF_UI_OPTS[@]}" "${FZF_STYLE_OPTS[@]}" $FZF_COLOR_OPTS \
+                    --header-label=" POD: $INSTANCE " --input-label=" SELECT CONTAINER ")
+                STATUS=$?
+                if [[ $STATUS -eq 10 || -z "$LOG_CONTAINER" ]]; then
+                    STEP="INSTANCE"; continue
+                fi
+                LOG_CONTAINER_FLAG="-c $LOG_CONTAINER"
+            fi
+            STEP="FINISH"
+            ;;
+
+        "GET_FORMAT")
+            FORMATS=$(printf "%-6s  %s\n" \
+                "table" "Default table view" \
+                "wide"  "More columns  (node, IP, etc.)" \
+                "yaml"  "Full YAML manifest" \
+                "json"  "Full JSON output")
+
+            FORMAT_SEL=$(echo "$FORMATS" | fzf "${FZF_UI_OPTS[@]}" "${FZF_STYLE_OPTS[@]}" $FZF_COLOR_OPTS \
+                --header-label=" $NAMESPACE / $RESOURCE / $INSTANCE " --input-label=" OUTPUT FORMAT ")
+
+            STATUS=$?
+            if [[ $STATUS -eq 10 || -z "$FORMAT_SEL" ]]; then
+                STEP="INSTANCE"
+            else
+                GET_FORMAT=$(echo "$FORMAT_SEL" | awk '{print $1}')
+                STEP="FINISH"
+            fi
+            ;;
+
+        "PORT_FORWARD")
+            clear
+            draw_status_bar "port-forward $RESOURCE"
+            echo -e "\n  ${B}$RESOURCE${NC}${D}/${NC}${CY}$INSTANCE${NC}  ${D}(ns: $NAMESPACE)${NC}\n"
+            echo -e "  ${D}Format:${NC} ${B}local_port:remote_port${NC}  ${D}(e.g. 8080:80)${NC}"
+            echo -n "  Ports: "
+            read -r PF_PORTS
+            if [[ -z "$PF_PORTS" || ! "$PF_PORTS" =~ ^[0-9]+:[0-9]+$ ]]; then
+                STEP="INSTANCE"
+            else
+                STEP="FINISH"
+            fi
             ;;
 
         "FINISH") break ;;
@@ -159,13 +465,92 @@ done
 # --- EXECUTION ---
 clear
 draw_status_bar "$ACTION $RESOURCE"
-FINAL_CMD="kubectl $ACTION $RESOURCE $INSTANCE -n $NAMESPACE"
-echo -e "${G}${ICON_ARROW}${NC} Executing: ${B}$FINAL_CMD${NC}\n"
 
-if [[ "$ACTION" == "logs" ]]; then
-    kubectl logs -f -n "$NAMESPACE" "$INSTANCE"
-elif [[ "$ACTION" == "explain" ]]; then
-    kubectl explain "$RESOURCE" | less
+case "$ACTION" in
+    "logs")
+        FINAL_CMD="kubectl logs -f $INSTANCE -n $NAMESPACE $LOG_CONTAINER_FLAG"
+        echo -e "${G}${ICON_ARROW}${NC} Executing: ${B}$FINAL_CMD${NC}\n"
+        trap '' SIGINT SIGTERM
+        kubectl logs -f "$INSTANCE" -n "$NAMESPACE" $LOG_CONTAINER_FLAG || true
+        trap "clear; exit 0" SIGINT SIGTERM
+        ;;
+    "explain")
+        FINAL_CMD="kubectl explain $RESOURCE"
+        echo -e "${G}${ICON_ARROW}${NC} Executing: ${B}$FINAL_CMD${NC}\n"
+        kubectl explain "$RESOURCE" | less
+        ;;
+    "events")
+        FINAL_CMD="kubectl get events -n $NAMESPACE --sort-by=.lastTimestamp"
+        echo -e "${G}${ICON_ARROW}${NC} Executing: ${B}$FINAL_CMD${NC}\n"
+        kubectl get events -n "$NAMESPACE" --sort-by=.lastTimestamp | less
+        ;;
+    "exec")
+        FINAL_CMD="kubectl exec -it $INSTANCE -n $NAMESPACE $CONTAINER_FLAG -- sh"
+        echo -e "${G}${ICON_ARROW}${NC} Executing: ${B}$FINAL_CMD${NC}\n"
+        kubectl exec -it "$INSTANCE" -n "$NAMESPACE" $CONTAINER_FLAG -- sh
+        ;;
+    "get")
+        [[ "$GET_FORMAT" == "table" ]] && FORMAT_FLAG="" || FORMAT_FLAG="-o $GET_FORMAT"
+        if [[ "$INSTANCE" == "ALL" ]]; then
+            FINAL_CMD="kubectl get $RESOURCE -n $NAMESPACE $FORMAT_FLAG"
+            echo -e "${G}${ICON_ARROW}${NC} Executing: ${B}$FINAL_CMD${NC}\n"
+            if [[ "$GET_FORMAT" =~ ^(yaml|json)$ ]]; then
+                kubectl get "$RESOURCE" -n "$NAMESPACE" $FORMAT_FLAG | less
+            else
+                kubectl get "$RESOURCE" -n "$NAMESPACE" $FORMAT_FLAG
+            fi
+        else
+            FINAL_CMD="kubectl get $RESOURCE $INSTANCE -n $NAMESPACE $FORMAT_FLAG"
+            echo -e "${G}${ICON_ARROW}${NC} Executing: ${B}$FINAL_CMD${NC}\n"
+            if [[ "$GET_FORMAT" =~ ^(yaml|json)$ ]]; then
+                kubectl get "$RESOURCE" "$INSTANCE" -n "$NAMESPACE" $FORMAT_FLAG | less
+            else
+                kubectl get "$RESOURCE" "$INSTANCE" -n "$NAMESPACE" $FORMAT_FLAG
+            fi
+        fi
+        ;;
+    "rollout")
+        FINAL_CMD="kubectl rollout $ROLLOUT_ACTION $RESOURCE/$INSTANCE -n $NAMESPACE"
+        echo -e "${G}${ICON_ARROW}${NC} Executing: ${B}$FINAL_CMD${NC}\n"
+        kubectl rollout "$ROLLOUT_ACTION" "$RESOURCE/$INSTANCE" -n "$NAMESPACE"
+        ;;
+    "scale")
+        FINAL_CMD="kubectl scale $RESOURCE $INSTANCE --replicas=$REPLICAS -n $NAMESPACE"
+        echo -e "${G}${ICON_ARROW}${NC} Executing: ${B}$FINAL_CMD${NC}\n"
+        kubectl scale "$RESOURCE" "$INSTANCE" --replicas="$REPLICAS" -n "$NAMESPACE"
+        ;;
+    "port-forward")
+        FINAL_CMD="kubectl port-forward $RESOURCE/$INSTANCE $PF_PORTS -n $NAMESPACE"
+        echo -e "${G}${ICON_ARROW}${NC} Executing: ${B}$FINAL_CMD${NC}\n"
+        echo -e "${D}Press Ctrl+C to stop.${NC}\n"
+        trap '' SIGINT SIGTERM
+        kubectl port-forward "$RESOURCE/$INSTANCE" "$PF_PORTS" -n "$NAMESPACE" || true
+        trap "clear; exit 0" SIGINT SIGTERM
+        ;;
+    "delete")
+        FINAL_CMD="kubectl delete $RESOURCE $INSTANCE -n $NAMESPACE"
+        echo -e "${R}${ICON_WARN}${NC} About to execute: ${B}$FINAL_CMD${NC}\n"
+        echo -n "  Confirm deletion? (y/N): "
+        read -r CONFIRM
+        if [[ "$CONFIRM" =~ ^[yY]$ ]]; then
+            kubectl delete "$RESOURCE" "$INSTANCE" -n "$NAMESPACE"
+        else
+            echo -e "\n  ${Y}${ICON_WARN}${NC} ${D}Cancelled.${NC}"
+        fi
+        ;;
+    *)
+        FINAL_CMD="kubectl $ACTION $RESOURCE $INSTANCE -n $NAMESPACE"
+        echo -e "${G}${ICON_ARROW}${NC} Executing: ${B}$FINAL_CMD${NC}\n"
+        kubectl "$ACTION" "$RESOURCE" -n "$NAMESPACE" "$INSTANCE"
+        ;;
+esac
+
+echo -e "\n${D}────────────────────────────────────────────${NC}"
+echo -e "  ${D}Press any key to return, Ctrl+C to exit.${NC}"
+read -n 1 -s
+if [[ -n "${BACK_CMD:-}" ]]; then
+    IFS=':' read -ra _BACK <<< "$BACK_CMD"
+    exec "$SCRIPT_DIR/${_BACK[0]}" "${_BACK[@]:1}"
 else
-    kubectl "$ACTION" "$RESOURCE" -n "$NAMESPACE" "$INSTANCE"
+    exec "$SCRIPT_DIR/kli"
 fi

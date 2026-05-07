@@ -1,0 +1,101 @@
+#!/usr/bin/env bash
+# kli-find - Cross-Namespace Resource Search
+
+SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
+source "$SCRIPT_DIR/kli-ui" || exit 1
+VERSION=$(cat "$SCRIPT_DIR/VERSION" 2>/dev/null || echo "0.2.0")
+
+RESOURCE_TYPES=$(printf "%-22s  %s\n" \
+    "pods"                   "Running containers" \
+    "deployments"            "Replica-managed pod sets" \
+    "services"               "Network endpoints & load balancers" \
+    "ingress"                "HTTP routing rules" \
+    "configmaps"             "Configuration data" \
+    "secrets"                "Sensitive config data" \
+    "statefulsets"           "Stateful ordered pod sets" \
+    "daemonsets"             "One pod per node" \
+    "jobs"                   "One-shot batch tasks" \
+    "cronjobs"               "Scheduled recurring tasks" \
+    "persistentvolumeclaims" "Storage requests" \
+    "horizontalpodautoscalers" "Autoscaling rules")
+
+pick_resource_type() {
+    local preselect="${1:-}"
+    echo "$RESOURCE_TYPES" | fzf \
+        "${FZF_UI_OPTS[@]}" "${FZF_STYLE_OPTS[@]}" $FZF_COLOR_OPTS \
+        --header-label=" KLI : FIND — SELECT RESOURCE TYPE " \
+        --input-label=" Type " \
+        --border-label=" esc: quit • enter: search " \
+        --query "$preselect" \
+        --preview-window=right:55%:border-left:wrap \
+        --preview "bash $SCRIPT_DIR/kli-engine action {1}" | awk '{print $1}'
+}
+
+RESOURCE="${1:-}"
+LAST_RESOURCE=""
+
+while true; do
+    if [[ -z "$RESOURCE" ]]; then
+        clear; draw_logo "$VERSION"; draw_status_bar "find"
+        RESOURCE=$(pick_resource_type "$LAST_RESOURCE")
+        [[ -z "$RESOURCE" ]] && exit 0
+    fi
+    LAST_RESOURCE="$RESOURCE"
+
+    ALL_DATA=$(kubectl get "$RESOURCE" -A --no-headers 2>/dev/null)
+    if [[ -z "$ALL_DATA" ]]; then
+        clear; draw_logo "$VERSION"; draw_status_bar "find · $RESOURCE"
+        echo -e "\n  ${Y}${ICON_WARN}${NC} No ${B}$RESOURCE${NC} found across any namespace."
+        sleep 1.5
+        RESOURCE=""
+        continue
+    fi
+
+    COUNT=$(echo "$ALL_DATA" | wc -l | tr -d ' ')
+
+    LIST=$(echo "$ALL_DATA" | awk '{
+        ns = $1; name = $2
+        name = length(name) > 52 ? substr(name, 1, 52)".." : name
+        rest = ""; for(i=3; i<=NF; i++) rest = rest " " $i
+        printf "  %-22s %-54s %s\n", ns, name, rest
+    }' | sed -E \
+        -e "s/(Running|Active|Ready|Succeeded|Bound|True)/${G}\1${NC}/g" \
+        -e "s/(Pending|ContainerCreating|Terminating|Progressing)/${Y}\1${NC}/g" \
+        -e "s/(Failed|Error|CrashLoopBackOff|OOMKilled|ImagePullBackOff|Unknown|False)/${R}\1${NC}/g")
+
+    HEADER=$(printf "  %-22s %-54s %s\n" "NAMESPACE" "NAME" "INFO →")
+    FIND_FOOTER=" esc: change type • enter: actions • ctrl-c: quit "
+
+    SEL=$(echo "$LIST" | fzf \
+        "${FZF_UI_OPTS[@]}" "${FZF_STYLE_OPTS[@]}" $FZF_COLOR_OPTS \
+        --ansi \
+        --header-label=" KLI : FIND · $RESOURCE · $COUNT found " \
+        --input-label=" Search " \
+        --header="$HEADER" \
+        --border-label="$FIND_FOOTER" \
+        --preview-window=down:14:border-top \
+        --preview "bash $SCRIPT_DIR/kli-engine preview $RESOURCE {2} {1}")
+
+    STATUS=$?
+
+    if [[ $STATUS -ne 0 || -z "$SEL" ]]; then
+        RESOURCE=""
+        continue
+    fi
+
+    NS=$(echo "$SEL" | awk '{print $1}')
+    NAME_ARG=$(echo "$SEL" | awk '{print $2}')
+
+    if [[ "$NAME_ARG" == *..* ]]; then
+        PREFIX="${NAME_ARG%..}"
+        FULL_NAME=$(kubectl get "$RESOURCE" -n "$NS" --no-headers 2>/dev/null | \
+            awk -v p="$PREFIX" 'substr($1,1,length(p))==p{print $1; exit}')
+        NAME="${FULL_NAME:-$PREFIX}"
+    else
+        NAME="$NAME_ARG"
+    fi
+
+    echo -e "\n${G}${ICON_ARROW}${NC} ${B}$NAME${NC}  ${D}·${NC}  ${CY}$NS${NC}  ${D}·${NC}  $RESOURCE"
+    sleep 0.3
+    exec "$SCRIPT_DIR/kli" -n "$NS" --resource "$RESOURCE" --instance "$NAME" --back "kli-find:$RESOURCE"
+done

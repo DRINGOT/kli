@@ -1,0 +1,95 @@
+# kli-completion — shell completion for kli
+# Source this file in your ~/.zshrc or ~/.bashrc:
+#   source /usr/local/bin/kli-completion
+
+# --- ZSH ---
+if [[ -n "$ZSH_VERSION" ]]; then
+    _kli_zsh() {
+        local state
+        local -a commands
+
+        commands=(
+            'ctx:Switch cluster context'
+            'ns:Switch active namespace'
+            'top:Live pod CPU/MEM usage (all namespaces)'
+            'nodes:Cluster node resource overview'
+            'find:Search resources across all namespaces'
+        )
+
+        _arguments -C \
+            '(-h --help)'{-h,--help}'[Show help]' \
+            '(-v --version)'{-v,--version}'[Show version]' \
+            '(-n --namespace)'{-n,--namespace}'[Set namespace]:namespace:->namespace' \
+            '--explorer[Jump to resource explorer]' \
+            '--pod[Jump to pod action menu]:pod:' \
+            '--resource[Pre-select resource type]:resource:->resource' \
+            '--instance[Pre-select resource instance]:instance:' \
+            '1:command:->command' \
+            '*:args:->args'
+
+        case $state in
+            command)
+                _describe 'command' commands
+                ;;
+            namespace)
+                local -a namespaces
+                namespaces=(${(f)"$(kubectl get namespaces -o name 2>/dev/null | sed 's/namespace\///')"})
+                _describe 'namespace' namespaces
+                ;;
+            resource)
+                local -a resources
+                resources=(pods deployments services ingress configmaps secrets statefulsets daemonsets replicasets jobs cronjobs endpoints horizontalpodautoscalers persistentvolumeclaims)
+                _describe 'resource type' resources
+                ;;
+            args)
+                case $words[2] in
+                    find)
+                        local -a resources
+                        resources=(pods deployments services ingress configmaps secrets statefulsets daemonsets jobs cronjobs endpoints)
+                        _describe 'resource type' resources
+                        ;;
+                    -n|--namespace)
+                        local -a namespaces
+                        namespaces=(${(f)"$(kubectl get namespaces -o name 2>/dev/null | sed 's/namespace\///')"})
+                        _describe 'namespace' namespaces
+                        ;;
+                esac
+                ;;
+        esac
+    }
+
+    if (( ${+functions[compdef]} )); then
+        compdef _kli_zsh kli
+    else
+        autoload -U compinit && compinit 2>/dev/null
+        compdef _kli_zsh kli
+    fi
+    return
+fi
+
+# --- BASH ---
+_kli_completions() {
+    local cur="${COMP_WORDS[COMP_CWORD]}"
+    local prev="${COMP_WORDS[COMP_CWORD-1]}"
+    local commands="ctx ns top nodes find --help --version --explorer --namespace --pod --resource --instance"
+
+    case "$prev" in
+        -n|--namespace)
+            local namespaces
+            namespaces=$(kubectl get namespaces -o name 2>/dev/null | sed 's/namespace\///')
+            COMPREPLY=($(compgen -W "$namespaces" -- "$cur"))
+            return
+            ;;
+        find|--resource)
+            local resources="pods deployments services ingress configmaps secrets statefulsets daemonsets replicasets jobs cronjobs endpoints"
+            COMPREPLY=($(compgen -W "$resources" -- "$cur"))
+            return
+            ;;
+    esac
+
+    if [[ $COMP_CWORD -eq 1 ]]; then
+        COMPREPLY=($(compgen -W "$commands" -- "$cur"))
+    fi
+}
+
+complete -F _kli_completions kli

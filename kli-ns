@@ -4,15 +4,15 @@
 SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
 source "$SCRIPT_DIR/kli-ui" || exit 1
 
-# --- MODE PREVIEW INTERNE ---
+# --- PREVIEW ---
 if [[ "${1:-}" == "--preview" ]]; then
     ns="$2"
     echo -e "${CY}${ICON_PREFIX} NAMESPACE: ${B}$ns${NC}"
     draw_line "NAMESPACE: $ns"
 
-    # 1. PODS STATUS (Alignement dynamique)
+    # 1. PODS STATUS
     echo -e "\n${BL}⬡ PODS${NC}"
-    # On limite à 15 pods pour garder la preview rapide
+    # LIMITS 15 FOR PERF
     pods=$(kubectl get pods -n "$ns" --no-headers --request-timeout=1.5s 2>/dev/null | head -n 15)
 
     if [[ -z "$pods" ]]; then
@@ -20,10 +20,9 @@ if [[ "${1:-}" == "--preview" ]]; then
     else
         printf "   ${D}%-45s %-10s %-15s %-5s${NC}\n" "NAME" "READY" "STATUS" "AGE"
         echo "$pods" | while read -r name ready status restarts age; do
-            printf "   %-45s %-10s " "${name:0:43}" "$ready"
-            # Utilisation de smart_color pour les Running/Error/Pending
+            printf "   %-45s %-8s " "${name:0:43}" "$ready"
             echo "$status" | smart_color | tr -d '\n'
-            printf " %-5s\n" "${D}$age${NC}"
+            printf " %-5s\n" "        ${D}$age${NC}"
         done
     fi
 
@@ -45,13 +44,13 @@ if [[ "${1:-}" == "--preview" ]]; then
 
     # 3. RESOURCE USAGE (TOP)
     echo -e "\n${Y}⚡ TOP PODS (MEM)${NC}"
-    # On trie par mémoire (colonne 3) pour voir les plus gourmands
+    # SORT TOP MEM
     top_pods=$(kubectl top pods -n "$ns" --no-headers --request-timeout=2s 2>/dev/null | sort -rhk 3 | head -n 8)
 
     if [[ -n "$top_pods" ]]; then
         printf "   ${D}%-45s %-15s %-15s${NC}\n" "NAME" "CPU" "MEMORY"
         echo "$top_pods" | while read -r name cpu mem; do
-            printf "   %-45s %-15s %-15s\n" "${name:0:43}" "$cpu" "$mem"
+            printf " %-45s %-15s %-15s\n" "${name:0:43}" "$cpu" "$mem"
         done | smart_color
     else
         echo -e "   ${D}Metrics not available${NC}"
@@ -60,10 +59,9 @@ if [[ "${1:-}" == "--preview" ]]; then
     exit 0
 fi
 
-# --- INTERFACE PRINCIPALE ---
+# --- INTERFACE ---
 current_ns=$(kubectl config view --minify -o jsonpath='{..namespace}' 2>/dev/null || echo "default")
 
-# Liste des namespaces sans boule, mais avec une mise en avant de l'actuel
 list_namespaces() {
     kubectl get ns -o name | sed 's/namespace\///' | while read -r line; do
         if [[ "$line" == "$current_ns" ]]; then
@@ -74,7 +72,6 @@ list_namespaces() {
     done
 }
 
-# fzf avec ton style centralisé
 choice=$(list_namespaces | fzf "${FZF_UI_OPTS[@]}" $FZF_COLOR_OPTS \
     --ansi \
     --style=full --padding=1,2 \
@@ -86,7 +83,6 @@ choice=$(list_namespaces | fzf "${FZF_UI_OPTS[@]}" $FZF_COLOR_OPTS \
     --prompt "Switch to › ")
 
 if [[ -n "$choice" ]]; then
-    # Nettoyage du nom sélectionné
     clean_ns=$(echo "$choice" | sed 's/ (current)//;s/  //' | xargs)
 
     kubectl config set-context --current --namespace="$clean_ns" >/dev/null

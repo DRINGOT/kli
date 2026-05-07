@@ -1,12 +1,10 @@
 #!/usr/bin/env bash
 # kli-ui - Central UI Library for KLI
 
-# --- COULEURS ANSI ---
 B=$(printf '\033[1m'); D=$(printf '\033[90m'); G=$(printf '\033[32m')
 R=$(printf '\033[31m'); Y=$(printf '\033[33m'); BL=$(printf '\033[34m')
 CY=$(printf '\033[36m'); NC=$(printf '\033[0m')
 
-# --- SYMBOLES ---
 ICON_OK="●"; ICON_ERR="✖"; ICON_WARN="▲"; ICON_INFO="○"
 ICON_ARROW="›"; ICON_PREFIX="╶╴"
 
@@ -23,6 +21,7 @@ FZF_UI_OPTS=(
 FZF_PREVIEW_CTX="--preview-window=right:65%:border-left"
 FZF_PREVIEW_NS="--preview-window=right:85%:border-left:wrap"
 FZF_PREVIEW_DEFAULT="--preview-window=right:80%:border-left"
+FZF_PREVIEW_OPTS="$FZF_PREVIEW_DEFAULT"
 
 FZF_COLOR_OPTS="--color=border:7,label:7,header:7,pointer:2,hl:2,fg:7,fg+:15,bg+:-1,gutter:-1,header-label:bold:cyan,input-label:bold:white"
 FOOTER_LABEL=" esc: return • ctrl+c: quit "
@@ -35,7 +34,7 @@ FZF_STYLE_OPTS=(
     "--bind=esc:abort+execute(exit 10),ctrl-c:abort"
 )
 
-# --- FONCTIONS DE RENDU UI ---
+# --- UI ---
 draw_logo() {
     printf "${B}  _  ___      _____
  | |/ / |    |_   _|

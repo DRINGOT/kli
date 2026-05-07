@@ -29,14 +29,14 @@ SUDO=""; [[ ! -w "$INSTALL_DIR" ]] && SUDO="sudo"
 [[ -n "$SUDO" ]] && echo -e "  ${Y}${ICON_WARN}${NC}  ${D}Requesting sudo privileges...${NC}"
 
 
-FILES=("kli" "kli-engine" "kli-ui" "VERSION" "kli-run" "kli-ctx" "kli-ns")
+FILES=("kli" "kli-engine" "kli-ui" "VERSION" "kli-ctx" "kli-ns" "kli-top" "kli-node" "kli-find" "kli-completion")
 
 for f in "${FILES[@]}"; do
     if [[ -f "$SCRIPT_DIR/$f" ]]; then
         $SUDO cp -f "$SCRIPT_DIR/$f" "$INSTALL_DIR/$f"
 
         # LOGIQUE DYNAMIQUE : On chmod +x tout sauf la lib UI et le fichier VERSION
-        if [[ "$f" != "kli-ui" && "$f" != "VERSION" ]]; then
+        if [[ "$f" != "kli-ui" && "$f" != "VERSION" && "$f" != "kli-completion" ]]; then
             $SUDO chmod +x "$INSTALL_DIR/$f"
         fi
     fi
@@ -47,14 +47,21 @@ printf "  ${G}${ICON_OK}${NC}  %-10s ${D}› %s/kli${NC}\n" "kli" "$INSTALL_DIR"
 printf "  ${G}${ICON_OK}${NC}  %-10s ${D}› %s/kli-ctx${NC}\n" "kli-ctx" "$INSTALL_DIR"
 printf "  ${G}${ICON_OK}${NC}  %-10s ${D}› %s/kli-engine${NC}\n" "kli-engine" "$INSTALL_DIR"
 printf "  ${G}${ICON_OK}${NC}  %-10s ${D}› %s/kli-ns${NC}\n" "kli-ns" "$INSTALL_DIR"
-printf "  ${G}${ICON_OK}${NC}  %-10s ${D}› %s/kli-run${NC}\n" "kli-run" "$INSTALL_DIR"
 printf "  ${G}${ICON_OK}${NC}  %-10s ${D}› %s/kli-ui${NC}\n" "kli-ui" "$INSTALL_DIR"
+printf "  ${G}${ICON_OK}${NC}  %-10s ${D}› %s/kli-top${NC}\n" "kli-top" "$INSTALL_DIR"
+printf "  ${G}${ICON_OK}${NC}  %-10s ${D}› %s/kli-node${NC}\n" "kli-node" "$INSTALL_DIR"
+printf "  ${G}${ICON_OK}${NC}  %-10s ${D}› %s/kli-find${NC}\n" "kli-find" "$INSTALL_DIR"
+printf "  ${G}${ICON_OK}${NC}  %-10s ${D}› %s/kli-completion${NC}\n" "completion" "$INSTALL_DIR"
 
 echo -e "${D}──────────────────────────────────────────${NC}"
 echo -e "${G}✔  Installation complete!${NC}\n"
 echo -e "   ${B}Quick Start:${NC}"
 echo -e "   ${G}›${NC} kli          ${D}# Launch interactive mode${NC}"
-echo -e "   ${G}›${NC} kli run      ${D}# Launch Wizard / Diag${NC}"
 echo -e "   ${G}›${NC} kli ctx      ${D}# Fast Context Switch${NC}"
 echo -e "   ${G}›${NC} kli ns       ${D}# Fast Namespace Switch${NC}"
-echo -e "   ${G}›${NC} kli --help   ${D}# View all options${NC}\n"
+echo -e "   ${G}›${NC} kli top      ${D}# Global resource usage (pods)${NC}
+   ${G}›${NC} kli nodes    ${D}# Cluster node overview with CPU/RAM bars${NC}"
+echo -e "   ${G}›${NC} kli find     ${D}# Find pods across namespaces${NC}"
+echo -e "   ${G}›${NC} kli --help   ${D}# View all options${NC}"
+echo -e "\n   ${D}Shell completion:${NC}"
+echo -e "   ${G}›${NC} echo 'source $INSTALL_DIR/kli-completion' >> ~/.zshrc\n"
